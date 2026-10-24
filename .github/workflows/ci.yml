@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, test]
   push:
-    branches: [main]
+    branches: [main, test]
   workflow_dispatch:
 
 permissions:
@@ -14,15 +14,55 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ftb
+          POSTGRES_PASSWORD: ftb-test-only
+          POSTGRES_DB: ftb_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ftb -d ftb_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ftb:ftb-test-only@localhost:5432/ftb_test
+      TELEGRAM_ADMIN_IDS: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Install dependencies
-        run: npm install --ignore-scripts --package-lock=false
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
       - name: Check JavaScript syntax
         run: |
           for file in src/*.js; do
             node --check "$file"
           done
+      - name: Test workflows, authorization, statistics and PostgreSQL concurrency
+        run: npm test
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Install pinned browser test driver
+        run: npm install --prefix "$RUNNER_TEMP/ftb-browser" --ignore-scripts --no-audit --no-fund playwright@1.62.1
+      - name: Browser smoke tests on desktop and mobile
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/ftb-browser/node_modules/playwright
+        run: |
+          export CHROME_BINARY="$(command -v google-chrome)"
+          test -n "$CHROME_BINARY"
+          node tools/smoke-v3.mjs
+      - name: Retain synthetic browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ftb-browser-smoke
+          path: test-artifacts/*.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build Docker image
         run: docker build -t ftb-ci:${{ github.sha }} .

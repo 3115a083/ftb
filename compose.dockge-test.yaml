@@ -1,8 +1,8 @@
 services:
   app:
     build:
-      context: https://github.com/BSV2016/ftb.git#feat/complete-tournament-flow
-    image: ftb:feature-test
+      context: https://github.com/3115a083/ftb.git#test
+    image: ftb:local-test
     restart: unless-stopped
     ports:
       - "3000:3000"

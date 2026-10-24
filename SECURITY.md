@@ -33,3 +33,7 @@ Telegram-Bot-Tokens, Datenbankpasswörter und andere Zugangsdaten dürfen niemal
 ## English summary
 
 FTB supports security fixes for the current `main` branch and the latest released version. Please do not disclose vulnerabilities or secrets in public issues. Prefer GitHub Private Vulnerability Reporting when available, and never commit Telegram tokens, database passwords, or other credentials.
+
+## Rollen und Helferanmeldung
+
+Das Veranstaltungspasswort erlaubt nur eine Beitrittsanfrage. Die Turnierleitung muss jede Person freigeben. Rollen werden je Aktion neu aus der Datenbank geprüft. Die letzten Administrationsrechte lassen sich nicht entfernen. Passwort-Hashes, Anmeldelimits und Freigabestatus bleiben bei Neustart erhalten. Details und Grenzen: [Telegram-Leitfaden](docs/telegram.md#anmeldung-und-schutz-vor-rateversuchen). Passwortnachrichten können trotz Löschversuch zunächst im Telegram-Chat vorhanden sein; dort keine anderweitig verwendeten Passwörter einsetzen. CSV-Ausgaben neutralisieren Formeleingaben; öffentliche Statistiken enthalten keine Telegram-IDs.

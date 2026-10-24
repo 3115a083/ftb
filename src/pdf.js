@@ -127,3 +127,35 @@ export async function tournamentPdf() {
     }
   });
 }
+
+export async function statisticsPdf(stats) {
+ const { METRICS } = await import('./rules.js');
+ const { existsSync } = await import('node:fs');
+ const d=new PDFDocument({size:'A4',layout:'landscape',margin:36,info:{Title:`${stats.session.name} - Turbo-Statistik`}});
+ const font=['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf','/usr/share/fonts/ttf-dejavu/DejaVuSans.ttf','/usr/share/fonts/dejavu/DejaVuSans.ttf'].find(existsSync);
+ if(font)d.registerFont('Stats',font);
+ const face=font?'Stats':'Helvetica';
+ return collect(d,()=>{
+  const keys=stats.session.metrics,base=[{label:'Platz',width:35},{label:'Person',width:160},{label:'Spiele',width:40},{label:'Siege',width:40},{label:'Quote',width:55}];
+  const remaining=d.page.width-72-base.reduce((n,x)=>n+x.width,0);
+  const columns=[...base,...keys.map(k=>({label:METRICS[k].label,width:remaining/Math.max(1,keys.length)}))];
+  let page=0;
+  function header(){page++;d.font(face).fillColor('#122d26').fontSize(20).text(stats.session.name,36,32,{width:730});
+   d.fontSize(9).fillColor('#475569').text(`Turbo-Statistik | Nur freigegebene Spiele | Mindestspielzahl: ${stats.session.min_games}`,36,64);
+   d.text('Leere Werte: nicht erfasst. Runden bis leer: Durchschnitt erfasster Abschlüsse.',36,80);
+   let x=36;for(const col of columns){d.rect(x,106,col.width,42).fill('#e6efe9');d.fillColor('#173e32').fontSize(9).text(col.label,x+5,113,{width:col.width-10,height:32});x+=col.width;}
+   d.fontSize(8).fillColor('#64748b').text(`Seite ${page}`,36,d.page.height-28,{lineBreak:false});d.y=148;
+  }
+  header();
+  for(const [index,row] of [...stats.rows,stats.guests].entries()){
+   if(d.y> d.page.height-90){d.addPage();header();}
+   const y=d.y,height=44,name=row.name+(row.is_guest?' (Einsätze)':row.qualified?'':` (${row.played}/${stats.session.min_games}, ungewertet)`);
+   const cells=[row.place??'-',name,row.played,row.wins,row.is_guest||row.win_rate==null?'-':(row.win_rate*100).toFixed(1)+'%',...keys.map(k=>row.metrics[k]==null?'-':Number(row.metrics[k].toFixed(2)))];
+   let x=36;
+   for(let i=0;i<columns.length;i++){const col=columns[i];d.rect(x,y,col.width,height).fill(row.is_guest?'#e6efe9':index%2?'#f3f6f8':'#ffffff');d.font(face).fontSize(9).fillColor('#17202a').text(String(cells[i]),x+5,y+8,{width:col.width-10,height:height-12});x+=col.width;}
+   d.y=y+height;
+  }
+  if(d.y>d.page.height-80){d.addPage();header();}
+  d.font(face).fontSize(8).fillColor('#475569').text('Gäste werden gemeinsam ausgewiesen und erhalten keinen persönlichen Rang. Ihre Messwerte fließen nicht in Teamstatistiken ein.',36,d.y+15,{width:730});
+ });
+}

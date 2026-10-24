@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 const { Pool } = pg;
 export const db = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -70,6 +71,10 @@ export async function migrate() {
     CREATE TABLE IF NOT EXISTS admin_locks(scope varchar(80) PRIMARY KEY,telegram_user_id bigint NOT NULL,expires_at timestamptz NOT NULL);
     CREATE TABLE IF NOT EXISTS audit_log(id bigserial PRIMARY KEY,telegram_user_id bigint NOT NULL,action text NOT NULL,details jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now());
   `);
+  await db.query(await readFile(new URL('./operations.sql', import.meta.url), 'utf8'));
+  for (const id of (process.env.TELEGRAM_ADMIN_IDS || '').split(',').map(x=>x.trim()).filter(x=>/^\d+$/.test(x))) {
+    await db.query("INSERT INTO staff(telegram_id,display_name,role) VALUES($1,$2,'admin') ON CONFLICT DO NOTHING", [id, 'Administrator '+id]);
+  }
 }
 export async function audit(userId,action,details={}){await db.query('INSERT INTO audit_log(telegram_user_id,action,details) VALUES($1,$2,$3)',[userId,action,details])}
 export async function acquireLock(scope,userId,ttl=180){const c=await db.connect();try{await c.query('BEGIN');await c.query('DELETE FROM admin_locks WHERE expires_at<now()');const x=(await c.query('SELECT telegram_user_id FROM admin_locks WHERE scope=$1 FOR UPDATE',[scope])).rows[0];if(x&&String(x.telegram_user_id)!==String(userId)){await c.query('ROLLBACK');return{ok:false}}await c.query(`INSERT INTO admin_locks(scope,telegram_user_id,expires_at) VALUES($1,$2,now()+($3||' seconds')::interval) ON CONFLICT(scope) DO UPDATE SET telegram_user_id=EXCLUDED.telegram_user_id,expires_at=EXCLUDED.expires_at`,[scope,userId,ttl]);await c.query('COMMIT');return{ok:true}}finally{c.release()}}

@@ -8,7 +8,7 @@ Die öffentliche Webseite ist rein lesend. Die komplette Administration erfolgt 
 
 Eine statische Demo zeigt die Bedienung des Telegram-Bots und die Auswirkungen direkt auf einer simulierten Turnierhomepage.
 
-**[Interaktives FTB Mock-up öffnen](https://bsv2016.github.io/ftb/)**
+**[Interaktives FTB Mock-up öffnen](https://3115a083.github.io/ftb/)**
 
 Hinweis: Der Link funktioniert, sobald der GitHub-Pages-Workflow nach dem Merge aktiviert und erfolgreich ausgeführt wurde. Das Mock-up enthält keine echten Telegram-Zugangsdaten, keine Datenbank und keine produktiven Admin-Funktionen.
 
@@ -33,7 +33,7 @@ Hinweis: Der Link funktioniert, sobald der GitHub-Pages-Workflow nach dem Merge 
 
 ### Administration über Telegram
 
-Administratoren werden anhand ihrer numerischen Telegram-User-ID zugelassen. Der Bot ist für private Chats vorgesehen.
+Initiale Administratoren werden anhand numerischer Telegram-User-IDs angelegt. Weitere Personen melden sich mit einem gemeinsamen Veranstaltungspasswort an und erhalten erst nach persönlicher Leitungsfreigabe Helferrechte. Rollen und Teilnehmerprofile bleiben dauerhaft gespeichert. Der Bot ist für private Chats vorgesehen.
 
 Über den Bot können Administratoren:
 
@@ -52,6 +52,22 @@ Administratoren werden anhand ihrer numerischen Telegram-User-ID zugelassen. Der
 - eine passende K.-o.-Phase automatisch berechnen lassen
 - das Finale als Einzelspiel oder Best of Three festlegen
 - Testdaten erzeugen und gezielt wieder löschen
+
+## Neuer Spielbetrieb, Turbo und Statistiken
+
+Der [Telegram-Leitfaden](docs/telegram.md) beschreibt den vollständigen Menübaum, Rollen und Abläufe. [Prüfstand und offene Validierung](docs/validation-2026-10-24.md).
+
+- Administration, Turnierleitung und Helfer mit serverseitigen Berechtigungen.
+- Benannte Spielfelder, bestätigte Spielvorschläge, Helferzuweisung, Pause und Feldwechsel.
+- Ergebnisfreigabe durch die Turnierleitung, bevor Tabellen und Folgerunden aktualisiert werden.
+- Optionale Live-Metriken und konfigurierbare Tiebreaker.
+- Turbo-Modus mit Personen, wechselnden Zusammensetzungen und Siegquotenrangliste mit Mindestspielzahl.
+- Gäste nur pro Begegnung; gemeinsame Gästestatistik unabhängig von Team- und persönlichen Ranglisten.
+- PDF-/CSV-Statistikexport über Website und Bot.
+- Gemeinsames Veranstaltungspasswort mit Freigabeprozess und persistenten Grenzen gegen Rateversuche.
+- Reparaturdialog mit Auswirkungsprüfung und nachvollziehbarem Änderungsverlauf.
+
+Bestehende Teamturniere bleiben erhalten. Die Migration ist additiv. Vor einem Update ein Datenbankbackup erstellen und zunächst den `test`-Stand in einem separaten Teststack prüfen.
 
 ## Wertung
 
@@ -151,7 +167,7 @@ Dockge ist optional. Die vorhandene `compose.yaml` kann direkt mit Docker Compos
 ### 1. Repository klonen
 
 ```bash
-git clone https://github.com/BSV2016/ftb.git
+git clone https://github.com/3115a083/ftb.git
 cd ftb
 ```
 
@@ -321,4 +337,4 @@ Main features include configurable branding, teams and logos, automatic or manua
 
 The real application requires Docker, PostgreSQL and a Telegram bot. GitHub Pages hosts only the static interactive mock-up.
 
-**[Open the interactive mock-up](https://bsv2016.github.io/ftb/)**
+**[Open the interactive mock-up](https://3115a083.github.io/ftb/)**

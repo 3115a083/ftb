@@ -1,6 +1,6 @@
 services:
   app:
-    image: ghcr.io/bsv2016/ftb:latest
+    image: ghcr.io/3115a083/ftb:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://ftb:${DB_PASSWORD}@db:5432/ftb
