@@ -10,7 +10,7 @@ Eine statische Demo zeigt die Bedienung des Telegram-Bots und die Auswirkungen d
 
 **[Interaktives FTB Mock-up öffnen](https://3115a083.github.io/ftb/)**
 
-Hinweis: Der Link funktioniert, sobald der GitHub-Pages-Workflow nach dem Merge aktiviert und erfolgreich ausgeführt wurde. Das Mock-up enthält keine echten Telegram-Zugangsdaten, keine Datenbank und keine produktiven Admin-Funktionen.
+Hinweis: Im Fork unter Settings > Pages die Quelle GitHub Actions aktivieren. Der Workflow veröffentlicht die statische Demo aus `test`; ein Merge nach `main` ist dafür nicht nötig. Das Mock-up enthält keine echten Telegram-Zugangsdaten, keine Datenbank und keine produktiven Admin-Funktionen.
 
 ## Funktionen
 

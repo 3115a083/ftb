@@ -27,7 +27,7 @@ Die Umsetzung liegt auf `test` im Fork `3115a083/ftb`. [PR #1](https://github.co
 
 Die Screenshots der synthetischen Browserprüfung liegen im CI-Artefakt. Nachfolgende Integrationscommits werden erneut geprüft; den aktuellen Head-Status zeigt der PR. Die Demo-Konflikte mit dem bisherigen `main` werden im Entwicklungsbranch aufgelöst. Kein Merge nach `main` und kein produktives Containerdeployment durchgeführt.
 
-Noch nicht erfolgt: Abnahme mit echtem Telegram-Bot und mehreren Geräten, Backup-/Restore- und Reverse-Proxy-Abnahme. Das GitHub-Pages-Deployment ist ein separater Workflow und wird unabhängig von der Anwendung geprüft. Bestehende Schutz- und Sicherheitsprüfungen wurden nicht deaktiviert.
+Noch nicht erfolgt: Abnahme mit echtem Telegram-Bot und mehreren Geräten, Backup-/Restore- und Reverse-Proxy-Abnahme. Das GitHub-Pages-Deployment ist ein separater Workflow. Sein Deploy-Schritt meldet HTTP 404: Pages ist im Fork noch nicht aktiviert. Unter Settings > Pages muss die Quelle GitHub Actions aktiviert werden; der Workflow bleibt unverändert sichtbar und wird nicht zur Verdeckung des Fehlers deaktiviert. Bestehende Schutz- und Sicherheitsprüfungen wurden nicht deaktiviert.
 
 ## Übernahme des gesicherten Patches
 

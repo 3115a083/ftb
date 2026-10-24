@@ -40,7 +40,7 @@ try{
  await page.locator('.msg').last().getByRole('button',{name:'Gewinner melden'}).click();await page.locator('.msg').last().getByRole('button',{name:'Alex + Gast 1',exact:true}).click();
  await page.locator('.msg').last().getByRole('button',{name:'Meldung absenden'}).click();assert.match(await page.locator('#turboStatsBody').innerText(),/0 Gast-Einsätze/);
  await page.locator('.msg').last().getByRole('button',{name:'Ergebnis prüfen'}).click();await page.locator('.msg').last().getByRole('button',{name:'Ergebnis freigeben'}).click();
- assert.match(await page.locator('#turboStatsBody').innerText(),/1 Gast-Einsätze/);await page.getByRole('button',{name:'Turbo-Statistik',exact:true}).first().click();
+ assert.match(await page.locator('#turboStatsBody').innerText(),/1 Gast-Einsätze/);await page.locator('#statsNav').click();
  await page.screenshot({path:new URL('../test-artifacts/demo-desktop.png',import.meta.url).pathname,fullPage:true});
  await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.screenshot({path:new URL('../test-artifacts/demo-mobile.png',import.meta.url).pathname,fullPage:true});
  assert.deepEqual(errors,[]);console.log('OK: desktop/mobile, escaping, PDF/CSV downloads, live counters, guest aggregation and approval workflow');
