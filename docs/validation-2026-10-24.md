@@ -14,14 +14,21 @@ Umsetzung des abgestimmten Telegram-Workshops auf Basis von `test` (`ae77e8b5175
 - Statistik-PDF mit 30 Personen, langen Namen, Umlauten und Gästesumme erzeugt und gerendert; Tabellenköpfe, Seitenumbrüche und Gästebereich geprüft.
 - `git diff --check`: bestanden.
 
-## Noch nicht ausgeführte Prüfungen
+## CI im Fork
 
-Die GitHub-Verbindung für `BSV2016/ftb` meldet `push: false`; Git-Tree-Erstellung wird mit HTTP 403 „Resource not accessible by integration“ abgewiesen. Diese Sperre betrifft das Originalrepo. Auf ausdrücklichen Nutzerauftrag wird die Umsetzung im schreibbaren Fork `3115a083/ftb` auf `test` fortgeführt. Der dortige CI-Stand wird nach dem Push ergänzt.
+Die Umsetzung liegt auf `test` im Fork `3115a083/ftb`. [PR #1](https://github.com/3115a083/ftb/pull/1) hält die Übernahme nach `main` reviewbar. Die frühere HTTP-403-Sperre betrifft nur das Originalrepo `BSV2016/ftb`.
 
-Die vorbereitete CI führt Tests gegen PostgreSQL 17 einschließlich konkurrierender Zähler und doppelter Freigaben aus. Außerdem sind Chrome-Smokeprüfungen für Desktop/Mobil, Downloads und Demo-Abläufe sowie Docker-Build und Dependency-Audit enthalten. Diese neuen CI-Schritte sind noch nicht gelaufen. Der lokale Chrome-Start scheiterte in dieser Umgebung, daher keine echte Browserabnahme behauptet.
+[CI-Lauf 40126837062](https://github.com/3115a083/ftb/actions/runs/40126837062) auf Implementierungscommit `c66aa18236ad91564695c912e6525e41b83e6931` bestand:
 
-Nicht erfolgt: Test mit echtem Telegram-Bot/mehreren Geräten, Docker-Build, Deployment, Backup-/Restore- und Reverse-Proxy-Abnahme. Für die Übernahme nach `main` bleiben diese tatsächlichen Prüfgrenzen zu beachten. Bestehende Schutz- und Sicherheitsprüfungen wurden nicht deaktiviert.
+- Alle 23 Tests gegen PostgreSQL 17, ohne übersprungene Tests, einschließlich echter konkurrierender Zähler und doppelter Freigaben.
+- Dependency-Audit ohne bekannte Laufzeitbefunde.
+- Chrome-Smokeprüfung auf Desktop und Mobil: öffentliche Statistik, HTML-Escaping, tatsächliche PDF-/CSV-Downloads, Live-Zähler, Gastaggregation und Leitungsfreigabe.
+- Docker-Build mit Lockfile und PDF-Schriftpaket.
+
+Die Screenshots der synthetischen Browserprüfung liegen im CI-Artefakt. Nachfolgende Integrationscommits werden erneut geprüft; den aktuellen Head-Status zeigt der PR. Die Demo-Konflikte mit dem bisherigen `main` werden im Entwicklungsbranch aufgelöst. Kein Merge nach `main` und kein produktives Containerdeployment durchgeführt.
+
+Noch nicht erfolgt: Abnahme mit echtem Telegram-Bot und mehreren Geräten, Backup-/Restore- und Reverse-Proxy-Abnahme. Das GitHub-Pages-Deployment ist ein separater Workflow und wird unabhängig von der Anwendung geprüft. Bestehende Schutz- und Sicherheitsprüfungen wurden nicht deaktiviert.
 
 ## Übernahme des gesicherten Patches
 
-Der mitgelieferte Git-Patch basiert auf dem genannten `test`-Commit. In einem sauberen Checkout dieses Branches lässt er sich mit `git am /pfad/FTB-Telegram-Turbo.patch` übernehmen. Bei abweichendem Branchstand zuerst die Änderungen vergleichen. Keine Historie überschreiben. Nach Herstellung des GitHub-Schreibzugriffs den aktuellen Remote-Stand erneut lesen, Änderungen regulär nach `test` übertragen und alle CI-Ergebnisse auswerten.
+Der mitgelieferte Git-Patch basiert auf dem genannten `test`-Commit. In einem sauberen Checkout dieses Branches lässt er sich mit `git am /pfad/FTB-Telegram-Turbo.patch` übernehmen. Bei abweichendem Branchstand zuerst die Änderungen vergleichen. Keine Historie überschreiben. Die aktuelle Weiterentwicklung liegt inzwischen im Fork. Für neue Arbeiten dessen `test`-Branch verwenden; der frühere Patch ist nur der gesicherte Ausgangsstand.
