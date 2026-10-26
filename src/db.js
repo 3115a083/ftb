@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 const { Pool } = pg;
+// Calendar dates must not shift when the host timezone changes.
+pg.types.setTypeParser(1082,value=>value);
 export const db = new Pool({ connectionString: process.env.DATABASE_URL, max: Number(process.env.PG_POOL_MAX||4), idleTimeoutMillis:30000, connectionTimeoutMillis:10000 });
 
 export async function migrate() {

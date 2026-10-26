@@ -21,7 +21,7 @@ let hashes=0;
 export async function reserveLogin(ip){
  const c=await db.connect();try{await c.query('BEGIN');await c.query('SELECT id FROM event_control WHERE id=1 FOR UPDATE');
   const keys=['site:global','site:'+digest(ip)];
-  for(const key of keys){await c.query('INSERT INTO login_limits(key) VALUES($1) ON CONFLICT DO NOTHING',[key]);await c.query("UPDATE login_limits SET count=0,window_start=now() WHERE key=$1 AND window_start<now()-interval '15 minutes'",[key]);const l=(await c.query('SELECT count FROM login_limits WHERE key=$1',[key])).rows[0];if(l.count>=(key==='site:global'?60:8)){await c.query('COMMIT');return false;}}
+  for(const key of keys){await c.query('INSERT INTO login_limits(key) VALUES($1) ON CONFLICT DO NOTHING',[key]);await c.query("UPDATE login_limits SET count=0,window_start=now() WHERE key=$1 AND window_start<now()-($2::int*interval '1 second')",[key,key==='site:global'?60:900]);const l=(await c.query('SELECT count FROM login_limits WHERE key=$1',[key])).rows[0];if(l.count>=(key==='site:global'?120:8)){await c.query('COMMIT');return false;}}
   for(const key of keys)await c.query('UPDATE login_limits SET count=count+1 WHERE key=$1',[key]);await c.query('COMMIT');return true;
  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
 }
@@ -30,6 +30,7 @@ export async function authenticate(req){
  const raw=readCookie(req,'session');if(!/^[\w-]{32}$/.test(raw||''))return {config,session:null};
  const s=(await db.query(`SELECT s.* FROM site_sessions s LEFT JOIN site_accounts a ON a.id=s.account_id WHERE s.token_hash=$1 AND s.expires_at>now() AND s.epoch=$2 AND (s.account_id IS NULL OR (a.active AND a.version=s.account_version))`,[digest(raw),config.site_epoch])).rows[0];return {config,session:s||null};
 }
+async function clearLoginFailures(ip){await db.query('UPDATE login_limits SET count=0 WHERE key=$1',['site:'+digest(ip)]);}
 async function issueSession(res,config,account,remember){
  const raw=fresh(),duration=remember?30*86400000:12*3600000;
  // Recheck account and config in the INSERT to avoid concurrent revocation races.
@@ -60,7 +61,7 @@ export function installSiteAuth(app,getBotName){
   let account=null,hash=null;if(req.body.method==='account'){account=(await db.query('SELECT * FROM site_accounts WHERE username=$1 AND active',[String(req.body.username||'').toLowerCase()])).rows[0];hash=account?.password_hash;}else hash=(await db.query('SELECT site_password_hash FROM event_control WHERE id=1')).rows[0].site_password_hash;
   let valid=false;hashes++;try{valid=await checkPassword(req.body.password,hash);}finally{hashes--;}
   if(!valid){res.status(401);return page(req,res,config.site_methods,'Anmeldung fehlgeschlagen.');}
-  await issueSession(res,config,account,req.body.remember==='1');return res.redirect(303,'/');
+  await issueSession(res,config,account,req.body.remember==='1');await clearLoginFailures(req.ip);return res.redirect(303,'/');
  });
  app.post('/login/telegram',async(req,res)=>{
   const config=await siteConfig();if(!csrfValid(req)||!config.site_methods.includes('telegram'))return res.sendStatus(403);
@@ -79,7 +80,7 @@ export function installSiteAuth(app,getBotName){
   // Atomic consume, bound to the initiating browser and current configuration.
   const row=(await db.query('DELETE FROM site_challenges WHERE token_hash=$1 AND binding_hash=$2 AND epoch=$3 AND approved AND expires_at>now() RETURNING *',[digest(req.body.token),digest(binding),config.site_epoch])).rows[0];
   if(!row)return res.json({ready:false});
-  await issueSession(res,config,{id:row.account_id,version:row.account_version},row.remember);res.json({ready:true});
+  await issueSession(res,config,{id:row.account_id,version:row.account_version},row.remember);await clearLoginFailures(req.ip);res.json({ready:true});
  });
  app.post('/logout',async(req,res)=>{if(!csrfValid(req))return res.sendStatus(403);await db.query('DELETE FROM site_sessions WHERE token_hash=$1',[digest(readCookie(req,'session'))]);setCookie(res,'session','',{maxAge:0});res.redirect(303,'/login');});
  app.use(async(req,res,next)=>{const auth=await authenticate(req);req.site=auth.config;req.siteSession=auth.session;if(auth.config.site_methods.length&&!auth.session){if(req.path.startsWith('/api/'))return res.sendStatus(401);return res.redirect('/login');}next();});

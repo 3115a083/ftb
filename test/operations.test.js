@@ -239,10 +239,13 @@ test('combined website login protects exports, remembers sessions, prevents CSRF
  const {configureSite,saveSiteAccount}=await import('../src/site-control.js');await configureSite(1,{password:'Shared website password!',methods:['password','account']},key());
  await saveSiteAccount(1,{username:'visitor',password:'Private account password!'},key());assert.equal(await actor(77),undefined);
  await loginServer(async base=>{
+  assert.equal((await fetch(base+'/favicon.ico')).status,204);
   const locked=await fetch(base+'/statistik/gesamt.csv',{redirect:'manual'});assert.equal(locked.status,302);assert.equal(locked.headers.get('location'),'/login');
-  const form=await fetch(base+'/login'),html=await form.text(),cookie=cookiePair(form),csrf=formToken(html);
+  const form=await fetch(base+'/login'),html=await form.text(),cookie=cookiePair(form),csrf=formToken(html);assert.equal(form.headers.get('referrer-policy'),'strict-origin-when-cross-origin');
+  assert.equal((await fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded',origin:'null'},body:new URLSearchParams({csrf,method:'account',username:'visitor',password:'Private account password!'}),redirect:'manual'})).status,403);
   assert.equal((await fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({method:'account',username:'visitor',password:'Private account password!'}),redirect:'manual'})).status,403);
   const login=await fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded',origin:base},body:new URLSearchParams({csrf,method:'account',username:'visitor',password:'Private account password!',remember:'1'}),redirect:'manual'});assert.equal(login.status,303);assert.match(login.headers.get('set-cookie'),/HttpOnly/);assert.match(login.headers.get('set-cookie'),/Max-Age=2592000/);
+  assert.equal(Number((await db.query("SELECT count FROM login_limits WHERE key LIKE 'site:%' AND key<>'site:global'")).rows[0].count),0);
   const session=cookiePair(login);assert.equal((await fetch(base+'/statistik/gesamt.csv',{headers:{cookie:session}})).status,200);
   const account=(await db.query("SELECT id FROM site_accounts WHERE username='visitor'")).rows[0];await saveSiteAccount(1,{id:account.id,active:false},key());assert.equal((await fetch(base+'/',{headers:{cookie:session},redirect:'manual'})).status,302);
   const publicAgain=await configureSite(1,{methods:[]},key());assert.ok(publicAgain);assert.equal((await fetch(base+'/')).status,200);
