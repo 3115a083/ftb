@@ -210,7 +210,7 @@ test('mode switches are admin-only, persist and refuse occupied fields',async()=
  const {configureSite,siteConfig}=await import('../src/site-control.js');
  await assert.rejects(()=>configureSite(2,{mode:'turbo'},key()),/Administrator/);
  await configureSite(1,{mode:'turbo',minGames:2,tiebreakers:['hits']},key());await migrate();assert.equal((await siteConfig()).mode,'turbo');assert.deepEqual((await turboStats(null)).session.tiebreakers,['hits']);
- const f=await fixture();await assert.rejects(()=>configureSite(1,{mode:'classic'},key()),/abschließen/);
+ const f=await fixture();await db.query("UPDATE event_control SET mode='classic' WHERE id=1");await configureSite(1,{mode:'turbo'},key());await assert.rejects(()=>configureSite(1,{mode:'classic'},key()),/abschließen/);
  await matchAction(1,f.game.id,'cancel',{reason:'Test beendet'},key());await configureSite(1,{mode:'classic'},key());
  const wrong=await createTurbo(1,{sessionId:f.session.id,sideA:[{personId:f.alice.id}],sideB:[{personId:f.bob.id}]},key());
  await assert.rejects(()=>matchAction(1,wrong.id,'assign',{fieldId:f.field.id,helperId:1},key()),/anderen Instanzmodus/);

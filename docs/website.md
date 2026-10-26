@@ -39,3 +39,5 @@ Die Beispiel-Compose verwendet einen gemeinsamen PostgreSQL-Server mit drei getr
 7. Favoriten und Hell/Dunkel/Automatisch wählen, Browser neu öffnen.
 8. Alle drei Anmeldearten testen, Konto sperren und Sitzungen widerrufen. Geschützte Downloads dürfen ohne Sitzung keine Daten liefern.
 9. Im Bot die Instanz wechseln und einen alten Button öffnen. Er muss weiterhin seine ursprüngliche Instanz zeigen.
+
+Nach einem Update mit älteren, gleichzeitig betriebenen Modi können Administratoren unter Instanz & Website-Zugang → Andere Spiele abschließen aktive Begegnungen des anderen Modus beenden. Der Wechsel in einen Modus ist möglich, sobald keine aktiven Begegnungen des jeweils anderen Modus mehr bestehen. Neue Zuweisungen und Starts bleiben auf den gewählten Modus beschränkt.

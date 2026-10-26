@@ -10,7 +10,7 @@ export async function configureSite(id,data,key){
   requireThat(a.role==='admin','Nur Administratoren.');const before=await siteConfig(c);
   requireThat(data.version==null||Number(data.version)===before.site_version,'Website-Einstellungen inzwischen geändert. Dialog neu öffnen.');
   const mode=data.mode||before.mode;requireThat(['classic','turbo'].includes(mode),'Ungültiger Modus.');
-  if(mode!==before.mode)requireThat(!(await c.query('SELECT id FROM match_ops WHERE status=ANY($1::text[])',[BUSY])).rowCount,'Zuerst alle laufenden oder zugewiesenen Spiele abschließen.');
+  if(mode!==before.mode)requireThat(!(await c.query("SELECT id FROM match_ops WHERE status=ANY($1::text[]) AND (($2='turbo' AND game_id IS NOT NULL) OR ($2='classic' AND session_id IS NOT NULL))",[BUSY,mode])).rowCount,'Zuerst alle laufenden oder zugewiesenen Spiele abschließen.');
   const methods=data.methods??before.site_methods;requireThat(Array.isArray(methods)&&methods.every(x=>['password','account','telegram'].includes(x))&&new Set(methods).size===methods.length,'Ungültige Anmeldearten.');
   if(data.tiebreakers!=null)metricList(data.tiebreakers);
   if(data.minGames!=null)requireThat(Number.isInteger(data.minGames)&&data.minGames>=1&&data.minGames<=1000,'Mindestspielzahl: 1 bis 1000.');
