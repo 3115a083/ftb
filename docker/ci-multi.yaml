@@ -1,0 +1,8 @@
+# CI only: no external Telegram calls. Gateway routing has separate integration tests.
+services:
+  turnier:
+    environment:
+      BOT_GATEWAY_URL: ''
+  turbo:
+    environment:
+      BOT_GATEWAY_URL: ''

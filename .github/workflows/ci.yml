@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, test]
   push:
-    branches: [main]
+    branches: [main, test]
   workflow_dispatch:
 
 permissions:
@@ -14,15 +14,100 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ftb
+          POSTGRES_PASSWORD: ftb-test-only
+          POSTGRES_DB: ftb_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ftb -d ftb_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ftb:ftb-test-only@localhost:5432/ftb_test
+      TELEGRAM_ADMIN_IDS: '1'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install dependencies
-        run: npm install --ignore-scripts --package-lock=false
+        uses: actions/checkout@v5
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
       - name: Check JavaScript syntax
         run: |
-          for file in src/*.js; do
+          for file in src/*.js public/*.js; do
             node --check "$file"
           done
+      - name: Test workflows, authorization, statistics and PostgreSQL concurrency
+        run: npm test
+      - name: Real gateway with two isolated app processes
+        run: node tools/gateway-smoke.mjs
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Install pinned browser test driver
+        run: npm install --prefix "$RUNNER_TEMP/ftb-browser" --ignore-scripts --no-audit --no-fund playwright@1.62.1
+      - name: Browser smoke tests on desktop and mobile
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/ftb-browser/node_modules/playwright
+        run: |
+          export CHROME_BINARY="$(command -v google-chrome)"
+          test -n "$CHROME_BINARY"
+          node tools/smoke-v3.mjs
+      - name: Retain synthetic browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ftb-browser-smoke
+          path: test-artifacts/*.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build Docker image
         run: docker build -t ftb-ci:${{ github.sha }} .
+
+      - name: Validate and start standalone Compose
+        env:
+          DB_PASSWORD: ci-test-only-123456789
+          TELEGRAM_BOT_TOKEN: ''
+          TELEGRAM_ADMIN_IDS: '1'
+        run: |
+          docker compose -f compose.dockge-test.yaml config --quiet
+          docker tag ftb-ci:${{ github.sha }} ftb:local-test
+          docker compose -f compose.dockge-test.yaml up -d --no-build --wait --wait-timeout 120
+          curl --fail http://127.0.0.1:3080/healthz
+          curl --fail http://127.0.0.1:3080/ | grep -q 'Spielbetrieb'
+      - name: Stop standalone Compose
+        if: always()
+        env:
+          DB_PASSWORD: ci-test-only-123456789
+        run: docker compose -f compose.dockge-test.yaml down --volumes
+      - name: Validate multiple instances and isolated databases
+        env:
+          DB_PASSWORD: ci-admin-secret-only
+          GATEWAY_DB_PASSWORD: ci-gateway-database-secret
+          TOURNAMENT_SECRET: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          TURBO_SECRET: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          TELEGRAM_BOT_TOKEN: ci-placeholder-unused
+          TELEGRAM_ADMIN_IDS: '1'
+        run: |
+          docker compose -f compose.multi-test.yaml config --quiet
+          docker tag ftb-ci:${{ github.sha }} ftb:multi-test
+          docker compose -f compose.multi-test.yaml -f docker/ci-multi.yaml up -d --no-build --wait --wait-timeout 180 db turnier turbo
+          curl --fail http://127.0.0.1:3080/ | grep -q 'Teamturnier'
+          curl --fail http://127.0.0.1:3081/ | grep -q 'Turbo'
+          docker compose -f compose.multi-test.yaml exec -T db psql -U postgres -d ftb_tournament -c "SELECT title FROM settings"
+          docker compose -f compose.multi-test.yaml exec -T db psql -U postgres -d ftb_turbo -c "SELECT mode FROM event_control"
+      - name: Stop multiple instances
+        if: always()
+        env:
+          DB_PASSWORD: ci-admin-secret-only
+          GATEWAY_DB_PASSWORD: ci-gateway-database-secret
+          TOURNAMENT_SECRET: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          TURBO_SECRET: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          TELEGRAM_BOT_TOKEN: ci-placeholder-unused
+          TELEGRAM_ADMIN_IDS: '1'
+        run: docker compose -f compose.multi-test.yaml -f docker/ci-multi.yaml down --volumes

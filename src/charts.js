@@ -1,0 +1,7 @@
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+export function bars(title,rows,{percent=false,description=''}={}){
+ if(!rows.length)return '';const selected=rows.slice(0,12).map(r=>({label:String(r.label),value:Number.isFinite(Number(r.value))?Math.max(0,Number(r.value)):0})),max=percent?100:Math.max(1,...selected.map(r=>r.value));
+ const values=selected.map(r=>r.label+': '+r.value+(percent?' %':'')).join('; ');
+ return `<section class="chart"><h3>${esc(title)}</h3>${description?`<p class="muted">${esc(description)}</p>`:''}<div class="chart-bars" role="img" aria-label="${esc(title)}" aria-description="${esc(values)}">${selected.map(r=>`<div class="chart-bar"><div class="chart-bar-label"><span class="chart-name">${esc(r.label)}</span><strong>${r.value}${percent?' %':''}</strong></div><div class="chart-track" aria-hidden="true"><span class="chart-fill" style="width:${Math.min(100,r.value/max*100)}%"></span></div></div>`).join('')}</div></section>`;
+}
+export function statisticsCharts(stats,months=[]){const rates=stats.rows.filter(r=>r.qualified&&r.played).map(r=>({label:r.name,value:Number((r.win_rate*100).toFixed(1))}));return bars('Siegquote im Vergleich',rates,{percent:true,description:'Bis zu zwölf gewertete Personen in Ranglistenreihenfolge. Die Mindestspielzahl gilt auch hier.'})+(months.length>1?bars('Freigegebene Spiele pro Monat',months,{description:'Jedes Spiel zählt einmal. Der gewählte Zeitraum gilt auch für dieses Diagramm.'}):'');}

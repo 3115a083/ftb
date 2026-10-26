@@ -1,12 +1,16 @@
 services:
   app:
-    image: ghcr.io/bsv2016/ftb:latest
+    image: ghcr.io/3115a083/ftb:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://ftb:${DB_PASSWORD}@db:5432/ftb
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS}
       PORT: 3000
+      SITE_URL: ${SITE_URL:?Set the public HTTPS SITE_URL}
+      ALLOW_HTTP_TEST: ${ALLOW_HTTP_TEST:-0}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      INSTANCE_MODE: ${INSTANCE_MODE:-classic}
     depends_on:
       db:
         condition: service_healthy
