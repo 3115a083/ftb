@@ -420,9 +420,9 @@ export function createBotController(bot,{username}={}){
 export async function startBot(){
  if(!process.env.TELEGRAM_BOT_TOKEN&&!process.env.BOT_GATEWAY_URL)return null;
  requireThat(!(process.env.TELEGRAM_BOT_TOKEN&&process.env.BOT_GATEWAY_URL),'Bot-Token nur im Gateway setzen oder Standalone-Betrieb wählen.');
- const remote=Boolean(process.env.BOT_GATEWAY_URL),bot=remote?remoteBot():new TelegramBot(process.env.TELEGRAM_BOT_TOKEN,{polling:true});
+ const remote=Boolean(process.env.BOT_GATEWAY_URL),bot=remote?remoteBot():new TelegramBot(process.env.TELEGRAM_BOT_TOKEN,{polling:false});
  let me;try{me=await bot.getMe();}catch{throw Error('Bot-Verbindung fehlgeschlagen. Token und Gateway prüfen.');}
  const controller=createBotController(bot,{username:me.username});
- if(!remote){bot.on('callback_query',controller.onCallback);bot.on('message',controller.onMessage);bot.on('polling_error',()=>console.error('Telegram-Verbindung fehlgeschlagen.'));await bot.setMyCommands([{command:'start',description:'Übersicht und offene Aufgaben'},{command:'spiele',description:'Meine Spiele'},{command:'turnier',description:'Turnier verwalten'},{command:'verwaltung',description:'Zugänge & Einstellungen'},{command:'abbrechen',description:'Dialog verwerfen'}]).catch(()=>{});}
+ if(!remote){bot.on('callback_query',controller.onCallback);bot.on('message',controller.onMessage);bot.on('polling_error',()=>console.error('Telegram-Verbindung fehlgeschlagen.'));await bot.setMyCommands([{command:'start',description:'Übersicht und offene Aufgaben'},{command:'spiele',description:'Meine Spiele'},{command:'turnier',description:'Turnier verwalten'},{command:'verwaltung',description:'Zugänge & Einstellungen'},{command:'abbrechen',description:'Dialog verwerfen'}]).catch(()=>{});await bot.startPolling();}
  return {bot,controller,username:me.username};
 }

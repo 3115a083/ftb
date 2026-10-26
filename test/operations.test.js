@@ -321,7 +321,7 @@ test('gateway binds old buttons to their originating instance and user across sw
 test('LAN HTTP serves assets without upgrading them while production retains HTTPS protections',async()=>{
  const {app}=await import('../src/index.js'),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const old=process.env.ALLOW_HTTP_TEST;
  try{const base=`http://127.0.0.1:${server.address().port}`;
-  process.env.ALLOW_HTTP_TEST='1';const testPage=await fetch(base+'/');assert.ok(!testPage.headers.get('content-security-policy').includes('upgrade-insecure-requests'));assert.equal(testPage.headers.get('strict-transport-security'),null);
+  process.env.ALLOW_HTTP_TEST='1';const testPage=await fetch(base+'/');const markup=await testPage.clone().text();assert.match(markup,/assets\/site\.css\?v=[a-f0-9]{16}/);assert.match(markup,/assets\/site\.js\?v=[a-f0-9]{16}/);assert.ok(!testPage.headers.get('content-security-policy').includes('upgrade-insecure-requests'));assert.equal(testPage.headers.get('strict-transport-security'),null);
   for(const [file,type] of [['site.css','text/css'],['site.js','javascript'],['theme.js','javascript']]){const r=await fetch(base+'/assets/'+file);assert.equal(r.status,200);assert.ok(r.headers.get('content-type').includes(type));assert.ok(!r.headers.get('content-security-policy').includes('upgrade-insecure-requests'));}
   delete process.env.ALLOW_HTTP_TEST;const secure=await fetch(base+'/');assert.match(secure.headers.get('content-security-policy'),/upgrade-insecure-requests/);assert.ok(secure.headers.get('strict-transport-security'));
  }finally{if(old===undefined)delete process.env.ALLOW_HTTP_TEST;else process.env.ALLOW_HTTP_TEST=old;await new Promise(r=>server.close(r));}
