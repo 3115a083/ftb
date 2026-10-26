@@ -37,3 +37,11 @@ FTB supports security fixes for the current `main` branch and the latest release
 ## Rollen und Helferanmeldung
 
 Das Veranstaltungspasswort erlaubt nur eine Beitrittsanfrage. Die Turnierleitung muss jede Person freigeben. Rollen werden je Aktion neu aus der Datenbank geprüft. Die letzten Administrationsrechte lassen sich nicht entfernen. Passwort-Hashes, Anmeldelimits und Freigabestatus bleiben bei Neustart erhalten. Details und Grenzen: [Telegram-Leitfaden](docs/telegram.md#anmeldung-und-schutz-vor-rateversuchen). Passwortnachrichten können trotz Löschversuch zunächst im Telegram-Chat vorhanden sein; dort keine anderweitig verwendeten Passwörter einsetzen. CSV-Ausgaben neutralisieren Formeleingaben; öffentliche Statistiken enthalten keine Telegram-IDs.
+
+## Website-Zugänge und gemeinsamer Bot
+
+Die Website kann optional Besucher authentifizieren. Das vergibt keine Verwaltungsrechte. Für öffentliche Instanzen sind HTTPS, `ALLOW_HTTP_TEST=0` und korrekt begrenztes Reverse-Proxy-Vertrauen erforderlich. Browser-Sitzungen sind serverseitig widerrufbar. Website-Passwort und Helferpasswort sind getrennt.
+
+Im Mehrinstanzbetrieb benötigt nur das Gateway den Bot-Token. Gateway und Instanzen verwenden individuelle interne Schlüssel und getrennte Datenbanken. Die internen Endpunkte werden nicht am Host veröffentlicht. Ein Instanzschlüssel autorisiert vertrauenswürdige Bot-Kommunikation und muss wie ein Passwort geschützt werden. Nur ein Polling-Prozess darf den gemeinsamen Bot-Token verwenden.
+
+Scrypt-Prüfungen für Website-Logins werden pro App auf zwei gleichzeitig begrenzt; persistente Limits gelten zusätzlich pro IP und global. Die Konfiguration von Trusted Proxies darf diese Limits nicht durch frei gesetzte Forwarded-Header umgehen.

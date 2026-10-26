@@ -1,340 +1,164 @@
-# FTB Tournament Platform
+# FTB
 
-FTB ist eine selbst gehostete Turnierplattform, die standardmäßig auf Flunkyball ausgelegt ist. Die Sportart kann im Onboarding geändert werden, daher eignet sich das Projekt auch für andere einfache Turnierformate mit Sieg/Niederlage-Wertung.
-
-Die öffentliche Webseite ist rein lesend. Die komplette Administration erfolgt über einen Telegram-Bot. Dadurch ist auf der Homepage kein eigener Admin-Login notwendig.
-
-## Interaktives Mock-up
-
-Eine statische Demo zeigt die Bedienung des Telegram-Bots und die Auswirkungen direkt auf einer simulierten Turnierhomepage.
-
-**[Interaktives FTB Mock-up öffnen](https://3115a083.github.io/ftb/)**
-
-Hinweis: Im Fork unter Settings > Pages die Quelle GitHub Actions aktivieren. Der Workflow veröffentlicht die statische Demo aus `test`; ein Merge nach `main` ist dafür nicht nötig. Das Mock-up enthält keine echten Telegram-Zugangsdaten, keine Datenbank und keine produktiven Admin-Funktionen.
+FTB ist eine selbst gehostete Turnierplattform mit öffentlicher oder passwortgeschützter Website. Die Verwaltung erfolgt über Telegram. Pro Instanz wird im Bot ein Teamturnier oder der Turbo-Modus eingestellt.
 
 ## Funktionen
 
-### Öffentliche Turnierseite
+- Live-Startseite mit benannten Spielfeldern, Begegnungen, Pausen, Freigabestatus und vorläufigen Metriken.
+- Automatische Aktualisierung im sichtbaren Browser-Tab, lokale Favoriten für Teams und Personen.
+- Spielplan mit Filtern, Gruppentabellen und nach Runden gegliederter K.-o.-Phase.
+- Team- und Personendetailseiten mit Statistiken und vollständiger, seitenweise abrufbarer Spielhistorie.
+- Mobile Ranglisten mit Platz, Name, Siegquote und Spielen. Weitere Werte stehen in der Detailansicht.
+- Helle und dunkle Darstellung nach Geräteeinstellung oder manueller Wahl. Die Wahl bleibt im Browser gespeichert.
+- Logo, Veranstaltungsfarben, Texte, Regelwerk, Laufbanner und Sponsoren.
+- Teamturnier mit Gruppenphase, K.-o.-Runden und Einzel- oder Best-of-Three-Finale.
+- Turbo mit frei gewählten Personen und Gästen pro Begegnung. Unterschiedlich große Seiten sind erlaubt und werden angezeigt.
+- Gäste gelten nur für die jeweilige Begegnung und erhalten eine gemeinsame Statistik, getrennt von Personen und Teams.
+- Turbo-Jahreswertung mit einstellbarer Mindestspielzahl, früheren Jahren, einzelnen Spieltagen und Gesamtzeitraum.
+- Metriken: Strafbiere erhalten, Strafbiere verteilt, Treffer und Runden bis leer.
+- PDF und CSV verwenden den gewählten Zeitraum und ausschließlich freigegebene Ergebnisse.
+- Administration, Turnierleitung und Helfer mit getrennten Rechten. Helfer können Spieler sein, dürfen im Teamturnier aber kein eigenes Team betreuen.
+- Gemeinsames Helferpasswort plus persönliche Freigabe. Spielfelder bleiben bis zur Ergebnisfreigabe belegt.
+- Ergebniskorrektur mit Begründung und Reparaturdialog für abhängige K.-o.-Begegnungen.
+- Optionaler Website-Zugang per Seitenpasswort, Benutzerkonto und Telegram, frei kombinierbar. Browser-Sitzungen lassen sich merken und widerrufen.
+- Ein gemeinsamer Bot kann mehrere Instanzen bedienen. Datenbanken, Rollen und Zugänge bleiben je Instanz getrennt.
 
-- für Smartphones optimierte Homepage
-- frei wählbarer Veranstaltungstitel und Sportart
-- Veranstaltungslogo
-- bis zu drei Vereins- oder Veranstaltungsfarben
-- automatische Kontrastprüfung für gute Lesbarkeit
-- farblich hervorgehobenes Laufbanner für wichtige Meldungen
-- Teamübersicht mit optionalen Logos
-- Gruppen und Tabellen
-- Spielplan und K.-o.-Phase
-- Regelwerk
-- sichtbare Kennzeichnung disqualifizierter Teams
-- Siegeranzeige mit Animation nach Turnierende
-- Berücksichtigung von `prefers-reduced-motion`
-- PDF-Download des Turniers
+## Installation zum Testen
 
-### Administration über Telegram
+Voraussetzungen: Docker Engine mit Docker Compose v2, Git und für die Verwaltung ein Telegram-Bot von `@BotFather` sowie deine numerische Telegram-User-ID.
 
-Initiale Administratoren werden anhand numerischer Telegram-User-IDs angelegt. Weitere Personen melden sich mit einem gemeinsamen Veranstaltungspasswort an und erhalten erst nach persönlicher Leitungsfreigabe Helferrechte. Rollen und Teilnehmerprofile bleiben dauerhaft gespeichert. Der Bot ist für private Chats vorgesehen.
-
-Über den Bot können Administratoren:
-
-- das initiale Onboarding durchführen
-- Titel, Sportart, Logo und Farben einstellen
-- das Regelwerk pflegen
-- das Laufbanner setzen oder deaktivieren
-- Teams mit optionalem Logo anlegen
-- Teams manuell Gruppen zuweisen
-- Gruppenzuordnungen nachträglich ändern
-- Teams automatisch und möglichst gleichmäßig auf Gruppen verteilen
-- Teams disqualifizieren
-- Spiele verwalten
-- Spiele als laufend oder abgesagt markieren
-- den Sieger eines Spiels per Button auswählen
-- eine passende K.-o.-Phase automatisch berechnen lassen
-- das Finale als Einzelspiel oder Best of Three festlegen
-- Testdaten erzeugen und gezielt wieder löschen
-
-## Neuer Spielbetrieb, Turbo und Statistiken
-
-Der [Telegram-Leitfaden](docs/telegram.md) beschreibt den vollständigen Menübaum, Rollen und Abläufe. [Prüfstand und offene Validierung](docs/validation-2026-10-24.md).
-
-- Administration, Turnierleitung und Helfer mit serverseitigen Berechtigungen.
-- Benannte Spielfelder, bestätigte Spielvorschläge, Helferzuweisung, Pause und Feldwechsel.
-- Ergebnisfreigabe durch die Turnierleitung, bevor Tabellen und Folgerunden aktualisiert werden.
-- Optionale Live-Metriken und konfigurierbare Tiebreaker.
-- Turbo-Modus mit Personen, wechselnden Zusammensetzungen und Siegquotenrangliste mit Mindestspielzahl.
-- Gäste nur pro Begegnung; gemeinsame Gästestatistik unabhängig von Team- und persönlichen Ranglisten.
-- PDF-/CSV-Statistikexport über Website und Bot.
-- Gemeinsames Veranstaltungspasswort mit Freigabeprozess und persistenten Grenzen gegen Rateversuche.
-- Reparaturdialog mit Auswirkungsprüfung und nachvollziehbarem Änderungsverlauf.
-
-Bestehende Teamturniere bleiben erhalten. Die Migration ist additiv. Vor einem Update ein Datenbankbackup erstellen und zunächst den `test`-Stand in einem separaten Teststack prüfen.
-
-## Wertung
-
-FTB verwendet standardmäßig eine reine Sieg/Niederlage-Wertung.
-
-Die Gruppentabellen enthalten:
-
-- Platz
-- Team
-- Spiele
-- Siege
-- Niederlagen
-
-Die Sortierung erfolgt primär nach Siegen. Bei Gleichstand wird zuerst der direkte Vergleich berücksichtigt. Disqualifizierte Teams bleiben sichtbar, werden aber aus der regulären Qualifikation ausgeschlossen.
-
-## Automatische K.-o.-Phase
-
-FTB berechnet aus der Anzahl der aktiven Teams eine sinnvolle K.-o.-Größe wie 4, 8, 16 oder 32 Teilnehmer.
-
-Die Qualifikationsplätze werden möglichst gleichmäßig über die Gruppen verteilt. Verbleibende Plätze werden an die besten nächstplatzierten Teams vergeben. Bei der Erstellung der Paarungen versucht das System außerdem, direkte Wiederholungen aus derselben Vorrundengruppe zu vermeiden.
-
-Vor dem Erzeugen des Spielbaums zeigt der Telegram-Bot die Empfehlung an und fragt nach dem Finalmodus:
-
-- ein Entscheidungsspiel
-- Best of Three, erstes Team mit zwei Siegen gewinnt
-
-Beim Best-of-Three wird ein drittes Finalspiel nur erzeugt, wenn es benötigt wird.
-
-## Testdaten
-
-Organisatoren können vor dem echten Turnier Beispielteams und Beispielspiele anlegen lassen.
-
-Testdaten werden eindeutig gekennzeichnet. Die Funktion `Testdaten löschen` entfernt ausschließlich Testteams und Testspiele. Erhalten bleiben:
-
-- Seitentitel
-- Sportart
-- Farben
-- Veranstaltungslogo
-- Regelwerk
-- Laufbanner
-- echte Teams
-- echte Spiele
-
-Testdaten werden nicht in das finale Turnier-PDF übernommen.
-
-## Schutz vor gleichzeitiger Bearbeitung
-
-Kritische Bot-Abläufe verwenden kurzlebige Datenbanksperren. Wenn zwei Administratoren denselben Bereich gleichzeitig bearbeiten wollen, erhält der zweite Administrator eine Warnung.
-
-Spieländerungen verwenden zusätzlich Versionsnummern. Eine veraltete Aktion kann dadurch kein neueres Ergebnis unbemerkt überschreiben.
-
-## PDF-Export
-
-Unter `/turnier.pdf` erzeugt die Anwendung ein aktuelles PDF mit den echten Turnierdaten, unter anderem:
-
-- Veranstaltungsinformationen
-- Gruppentabellen
-- Teams
-- Siege und Niederlagen
-- Spielplan
-- Ergebnisse
-- K.-o.-Informationen
-- Turniersieger
-
-## Architektur
-
-```text
-Internet
-   |
-Domain / HTTPS
-   |
-Reverse Proxy oder Pangolin
-   |
-Docker-Host
-   |
-   +-- FTB Anwendung
-   +-- PostgreSQL
-   +-- Telegram-Bot innerhalb des App-Services
-```
-
-PostgreSQL veröffentlicht im mitgelieferten Compose-Setup keinen Host-Port.
-
-## Voraussetzungen
-
-Für das Standard-Deployment benötigst du:
-
-- einen Rechner oder Server mit Docker
-- Docker Engine und Docker Compose
-- einen Telegram-Bot-Token von BotFather
-- die numerischen Telegram-User-IDs der Administratoren
-- für öffentliche Nutzung einen HTTPS-Zugang zur Anwendung
-
-Dockge ist optional. Die vorhandene `compose.yaml` kann direkt mit Docker Compose oder als Dockge-Stack verwendet werden.
-
-## Self-Hosting mit Docker
-
-### 1. Repository klonen
+### Eine Instanz
 
 ```bash
-git clone https://github.com/3115a083/ftb.git
+git clone --branch test --single-branch https://github.com/3115a083/ftb.git
 cd ftb
+cp .env.test.example .env
+openssl rand -hex 24
 ```
 
-### 2. Telegram-Bot anlegen
+Trage das erzeugte Passwort als `DB_PASSWORD` in `.env` ein. Ergänze:
 
-Öffne Telegram und starte einen Chat mit `@BotFather`.
-
-Erstelle mit `/newbot` einen Bot und speichere den Token sicher. Der Token ist ein Geheimnis und gehört niemals ins Git-Repository.
-
-### 3. Telegram-IDs der Administratoren ermitteln
-
-FTB verwendet numerische Telegram-User-IDs, keine Benutzernamen.
-
-Beispiel:
-
-```env
-TELEGRAM_ADMIN_IDS=123456789,987654321
+```dotenv
+TELEGRAM_BOT_TOKEN=DEIN_BOT_TOKEN
+TELEGRAM_ADMIN_IDS=DEINE_NUMERISCHE_ID
+INSTANCE_MODE=classic
 ```
 
-### 4. Umgebungsdatei erstellen
+`INSTANCE_MODE=turbo` startet bei einer neuen Datenbank im Turbo-Modus. Danach wird der Modus im Bot eingestellt und bleibt bei Neustarts erhalten.
 
 ```bash
-cp .env.example .env
+docker compose -f compose.dockge-test.yaml up -d --build --wait
+docker compose -f compose.dockge-test.yaml ps
 ```
 
-Danach mindestens diese Werte anpassen:
+Öffne **http://localhost:3080** auf dem Docker-Host. Für andere Geräte im Heimnetz setze `TEST_BIND_IP` auf die LAN-IP des Hosts und `SITE_URL` auf `http://DEINE_LAN_IP:3080`.
 
-```env
-DB_PASSWORD=ein-langes-zufaelliges-passwort
-TELEGRAM_BOT_TOKEN=dein-bot-token
-TELEGRAM_ADMIN_IDS=123456789
-```
+Sende dem Bot privat `/start`. Unter **Verwaltung → Instanz & Website-Zugang** stellst du Modus, Zeitzone, Mindestspielzahl und Anmeldearten ein. Unter **Seite verwalten** passt du die Veranstaltung an. **Verwaltung → Testdaten** legt Beispielteams und Beispielspiele für das Teamturnier an. Im Turbo legst du Personen, Spielfelder, eine Sitzung und dann Begegnungen an.
 
-Die Datei `.env` darf nicht committed werden.
+Ohne Bot-Token startet nur die Website, bei einer neuen Datenbank zunächst ohne Inhalte. Verwende für einen parallelen Einzelinstanz-Test einen eigenen Testbot.
 
-### 5. Stack starten
+Die Compose baut direkt aus dem Branch `test`; ein veröffentlichtes Container-Image ist nicht erforderlich. Für einen Build aus deinem lokalen Checkout:
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose -f compose.dockge-test.yaml -f compose.test.yaml up -d --build --wait
 ```
 
-Status prüfen:
+### Zwei Instanzen mit demselben Bot
+
+Die mitgelieferte `compose.multi-test.yaml` startet ein Teamturnier auf Port 3080, eine Turbo-Jahresrunde auf Port 3081, einen zentralen Bot-Dienst und einen PostgreSQL-Server mit getrennten Datenbanken und Datenbankbenutzern.
+
+Im geklonten Repository:
 
 ```bash
-docker compose ps
+cp .env.multi-test.example .env
 ```
 
-Logs anzeigen:
+Erzeuge für **jeden** dieser vier Werte unabhängig ein Passwort mit `openssl rand -hex 24` und trage es in `.env` ein:
+
+```dotenv
+DB_PASSWORD=
+GATEWAY_DB_PASSWORD=
+TOURNAMENT_SECRET=
+TURBO_SECRET=
+TELEGRAM_BOT_TOKEN=DEIN_BOT_TOKEN
+TELEGRAM_ADMIN_IDS=DEINE_NUMERISCHE_ID
+```
+
+Danach:
 
 ```bash
-docker compose logs -f app
+docker compose -f compose.multi-test.yaml up -d --build --wait
 ```
 
-### 6. Mit Dockge deployen
+Öffne **http://localhost:3080** und **http://localhost:3081**. Für LAN-Zugriff ändere `TEST_BIND_IP`, `TOURNAMENT_URL` und `TURBO_URL` passend zum Docker-Host.
 
-Erstelle in Dockge einen neuen Stack und verwende die `compose.yaml` dieses Repositories.
+Sende dem Bot `/instanzen` und wähle **Tagesturnier** oder **Turbo-Jahresrunde**. Jede Bot-Nachricht zeigt ihre Instanz. Ältere Buttons behalten ihre ursprüngliche Zuordnung. Schalte vor dem Start alle älteren Bot-Prozesse ab, die denselben Token verwenden. Nur der zentrale Dienst benötigt den Bot-Token.
 
-Hinterlege die gleichen Umgebungsvariablen beziehungsweise eine `.env` auf dem Docker-Host und starte den Stack.
+Die Dateien im Unterordner `docker` müssen neben der Compose vorhanden sein. In Dockge verwende deshalb den geklonten Ordner als Stack-Verzeichnis. Für den Einzelinstanz-Test genügt auch der Compose-Inhalt aus `compose.dockge-test.yaml` samt Umgebungsdatei.
 
-### 7. HTTPS bereitstellen
+## Website-Zugänge
 
-Veröffentliche ausschließlich die FTB-Anwendung über einen vertrauenswürdigen HTTPS-Reverse-Proxy oder Tunnel. PostgreSQL bleibt intern.
+Initial bleibt die Website öffentlich. Aktiviere den Schutz im Bot unter **Verwaltung → Instanz & Website-Zugang**:
 
-Mögliche Varianten:
+1. Setze ein **Seitenpasswort** oder lege unter **Website-Benutzer** Konten beziehungsweise Telegram-IDs an.
+2. Aktiviere die gewünschten **Anmeldearten**. Eine leere Auswahl macht die Website wieder öffentlich.
+3. Teste die Anmeldung in einem privaten Browserfenster.
 
-- Pangolin + Newt
-- Caddy
-- Traefik
-- Nginx Proxy Manager
-- Cloudflare Tunnel
+Website-Konten erhalten keine Bot-Verwaltungsrechte. Das Seitenpasswort ist unabhängig vom Helferpasswort. Die Anmeldung schützt auch PDF, CSV und die Live-Daten.
 
-### 8. Telegram-Onboarding starten
+Bei Telegram-Anmeldung öffnet der Browser den Bot. Vergleiche den angezeigten Code und bestätige die selbst begonnene Anmeldung. Nur der ursprüngliche Browser kann sie abschließen. Die Telegram-ID muss zuvor als Website-Zugang freigegeben sein.
 
-Sende deinem Bot in einem privaten Chat:
+**Angemeldet bleiben** speichert eine Sitzung für bis zu 30 Tage. Ohne diese Option setzt FTB einen Browser-Sitzungscookie mit maximal zwölf Stunden serverseitiger Gültigkeit. Sperren eines Kontos und Passwortänderungen machen zugehörige Sitzungen ungültig. **Alle Website-Sitzungen widerrufen** meldet alle Besucher ab.
 
-```text
-/start
-```
+## Öffentlicher Betrieb mit HTTPS
 
-Danach kannst du Branding, Regelwerk, Teams und Gruppen konfigurieren.
+Die Testkonfiguration verwendet HTTP und ist für ein vertrauenswürdiges lokales Netzwerk gedacht. Für öffentliche Nutzung:
 
-### 9. Vor dem Turnier testen
+- Veröffentliche nur die Website-Ports über Pangolin oder einen HTTPS-Reverse-Proxy. PostgreSQL und der Bot-Dienst bleiben intern.
+- Setze `SITE_URL`, bei mehreren Instanzen `TOURNAMENT_URL` und `TURBO_URL`, auf die jeweilige öffentliche HTTPS-Adresse.
+- Setze `ALLOW_HTTP_TEST=0`. Browser-Cookies verwenden dann `Secure` und den `__Host-`-Präfix.
+- Setze `TRUST_PROXY=1` nur bei genau einem vertrauenswürdigen Proxy vor der Anwendung. Verhindere dabei direkten Zugriff auf die App-Ports aus nicht vertrauenswürdigen Netzen.
+- Aktiviere bei Bedarf den Website-Zugangsschutz im Bot.
 
-Nutze die Testdaten-Funktion und prüfe mindestens:
+Ein gemeinsamer Bot genügt auch für unterschiedliche Website-Domains. Für Telegram-Anmeldung wird keine öffentliche Webhook-Adresse benötigt.
 
-- Darstellung auf dem Smartphone
-- Farbkontraste
-- Teamlogos
-- Gruppentabellen
-- Ergebniseingabe
-- automatische K.-o.-Empfehlung
-- Best-of-Three-Finale
-- PDF-Download
-- Siegeranzeige
+## Betrieb
 
-Lösche die Testdaten danach über den Bot.
-
-### 10. Backup erstellen
-
-Vor dem Turnier sollte ein PostgreSQL-Backup erstellt werden. Bewahre Backups außerhalb des Docker-Volumes auf.
-
-## Aktualisieren
-
-Bei Nutzung der GHCR-Images:
+Logs und Status, hier für die Einzelinstanz:
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose -f compose.dockge-test.yaml logs -f app
+docker compose -f compose.dockge-test.yaml ps
 ```
 
-Für echte Turniere sind versionierte Image-Tags besser als ausschließlich `latest`, da ein Rollback dadurch einfacher wird.
+Aktualisieren:
 
-## Hosting ohne eigene Domain oder VPS
+```bash
+git pull --ff-only
+docker compose -f compose.dockge-test.yaml build --pull
+docker compose -f compose.dockge-test.yaml up -d --wait
+```
 
-Eine eigene Domain und ein VPS sind nicht zwingend notwendig.
+Beim Mehrinstanzbetrieb verwende stattdessen `compose.multi-test.yaml`. Die Website pausiert automatische Aktualisierungen in unsichtbaren Tabs. PostgreSQL-Verbindungspools sind begrenzt, Container-Logs rotieren, und Exporte werden erst auf Anfrage erzeugt.
 
-### Cloudflare Tunnel
+Vor Updates sichere die Datenbank und die `.env` außerhalb des Docker-Volumes. Einzelinstanz-Backup:
 
-Ein Cloudflare Tunnel kann einen Dienst vom Heimserver veröffentlichen, ohne eingehende Ports im Router freizugeben.
+```bash
+docker compose -f compose.dockge-test.yaml exec -T db pg_dump -U ftb ftb > ftb-backup.sql
+```
 
-### Tailscale Funnel
+Mehrinstanz-Backup:
 
-Für Tests oder kleinere Veranstaltungen kann Tailscale Funnel einen lokalen Dienst über eine von Tailscale verwaltete HTTPS-Adresse verfügbar machen.
+```bash
+docker compose -f compose.multi-test.yaml exec -T db pg_dumpall -U postgres > ftb-multi-backup.sql
+```
 
-### Container-Hosting
+Stoppen erhält die Daten:
 
-FTB benötigt einen laufenden App-Container und PostgreSQL. Geeignet sind deshalb Hosting-Anbieter, die Docker oder Container sowie eine persistente PostgreSQL-Datenbank anbieten.
+```bash
+docker compose -f compose.dockge-test.yaml down
+```
 
-### GitHub
+`down --volumes` löscht die Daten des jeweiligen Stacks. Geänderte Datenbankpasswörter in `.env` ändern bereits initialisierte PostgreSQL-Benutzer nicht automatisch. Bot-Token, Passwörter und `.env` gehören nicht ins Repository.
 
-GitHub eignet sich für:
-
-- Quellcode
-- Pull Requests und Versionsverwaltung
-- GitHub Actions für Builds und Tests
-- GitHub Container Registry für Docker-Images
-- GitHub Pages für das statische Mock-up
-
-Die echte FTB-Anwendung kann nicht vollständig auf GitHub Pages laufen, da Pages nur statische Dateien ausliefert. Für die echte Anwendung werden Node.js, PostgreSQL und der laufende Telegram-Bot benötigt.
-
-## Sicherheit
-
-- PostgreSQL niemals direkt ins Internet veröffentlichen.
-- Telegram-Bot-Token niemals committen.
-- `.env` nicht ins Repository aufnehmen.
-- nur numerische Telegram-IDs erlaubter Administratoren hinterlegen.
-- HTTPS verwenden.
-- starke zufällige Datenbankpasswörter einsetzen.
-- Docker-Host und Images aktuell halten.
-- Dockge und den Docker-Host selbst nicht öffentlich zugänglich machen.
-- keine unnötigen Container-Rechte vergeben.
-- vor jedem Turnier die Admin-Liste kontrollieren.
-- einen offengelegten Telegram-Token sofort bei BotFather widerrufen und ersetzen.
-
-## Entwicklungsstand
-
-FTB befindet sich noch in aktiver Entwicklung. Vor einem echten Turnier sollte der komplette Ablauf mit Testdaten geprüft werden.
-
----
-
-## English summary
-
-FTB is a self-hosted tournament platform built primarily for Flunkyball and other simple win/loss team tournaments. It provides a public mobile-first tournament website and Telegram-based administration without a public admin login.
-
-Main features include configurable branding, teams and logos, automatic or manual group assignment, win/loss standings, disqualification, automatic knockout recommendations, single-game or best-of-three finals, demo data, concurrent-admin protection, winner animations and PDF export.
-
-The real application requires Docker, PostgreSQL and a Telegram bot. GitHub Pages hosts only the static interactive mock-up.
-
-**[Open the interactive mock-up](https://3115a083.github.io/ftb/)**
+Die `compose.yaml` verwendet ein veröffentlichtes GHCR-Image und benötigt eine HTTPS-`SITE_URL`. Nutze die Test-Compose, solange das gewünschte Image nicht veröffentlicht wurde.

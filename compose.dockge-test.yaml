@@ -1,3 +1,4 @@
+name: ftb-test
 services:
   app:
     build:
@@ -5,51 +6,55 @@ services:
     image: ftb:local-test
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${TEST_BIND_IP:-127.0.0.1}:${TEST_PORT:-3080}:3000"
     environment:
-      DATABASE_URL: postgresql://ftb:${DB_PASSWORD}@db:5432/ftb
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS}
+      DATABASE_URL: postgresql://ftb:${DB_PASSWORD:?Set a random hexadecimal DB_PASSWORD in .env}@db:5432/ftb
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS:-}
+      INSTANCE_MODE: ${INSTANCE_MODE:-classic}
+      INSTANCE_ID: local
+      SITE_URL: ${SITE_URL:-http://localhost:3080}
+      ALLOW_HTTP_TEST: ${ALLOW_HTTP_TEST:-1}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
       PORT: 3000
-      NODE_ENV: production
+      PG_POOL_MAX: 4
     depends_on:
       db:
         condition: service_healthy
-    networks:
-      - frontend
-      - backend
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    networks: [frontend, backend]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
     read_only: true
-    tmpfs:
-      - /tmp
-
+    tmpfs: [/tmp]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
   db:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: ftb
       POSTGRES_USER: ftb
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - ftb-test-db:/var/lib/postgresql/data
-    networks:
-      - backend
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set a random hexadecimal DB_PASSWORD in .env}
+    volumes: [ftb-test-db:/var/lib/postgresql/data]
+    networks: [backend]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ftb -d ftb"]
+      test: [CMD-SHELL, pg_isready -U ftb -d ftb]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
-    security_opt:
-      - no-new-privileges:true
-
+    logging: *logging
 networks:
   frontend:
   backend:
     internal: true
-
 volumes:
   ftb-test-db:

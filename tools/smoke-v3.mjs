@@ -7,7 +7,7 @@ import { setup, createTurbo, getMatch, matchAction, metricAction } from '../src/
 import { app } from '../src/index.js';
 const require=createRequire(import.meta.url);
 const { chromium }=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const {db,stop}=await database();
+const {db,stop}=await database();await db.query("UPDATE event_control SET mode='turbo',turbo_min_games=1 WHERE id=1");process.env.ALLOW_HTTP_TEST='1';
 const person=await setup(1,'person_add',{name:'Alex <Beispiel>'},'smoke-person-a'),other=await setup(1,'person_add',{name:'Robin & Co'},'smoke-person-b');
 const session=await setup(1,'session_add',{name:'Turbo-Vereinsabend',minGames:1},'smoke-session');
 const field=await setup(1,'field_add',{name:'QA Nord'},'smoke-field');
@@ -30,6 +30,13 @@ try{
  await mkdir(new URL('../test-artifacts/',import.meta.url),{recursive:true});await page.screenshot({path:new URL('../test-artifacts/statistics-desktop.png',import.meta.url).pathname,fullPage:true});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:new URL('../test-artifacts/statistics-mobile.png',import.meta.url).pathname,fullPage:true});
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Mobile page must not overflow horizontally');
+ await page.goto(base+'/personen');await page.getByRole('button',{name:'Alex <Beispiel> als Favorit merken',exact:true}).click();await page.goto(base+'/');await page.locator('#my-games').waitFor({state:'visible'});
+ await page.getByRole('button',{name:'Darstellung: Automatisch',exact:true}).click();await page.getByRole('button',{name:'Darstellung: Hell',exact:true}).click();assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');await page.reload();assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+ const liveGame=await createTurbo(1,{sessionId:session.id,sideA:[{personId:other.id}],sideB:[{personId:person.id},{guestName:'Gast aktuell'}]},'smoke-new');await matchAction(1,liveGame.id,'assign',{fieldId:field.id,helperId:'1'},'smoke-new-assign');await matchAction(1,liveGame.id,'start',{},'smoke-new-start');const liveRoster=(await getMatch(liveGame.id)).roster;await metricAction(1,liveGame.id,liveRoster[0].id,'hits','add','smoke-new-hit');
+ await page.reload();await page.getByText('Werte vorläufig',{exact:false}).first().waitFor();assert.ok(await page.locator('#favorite-matches .match:not([hidden])').count());await page.screenshot({path:new URL('../test-artifacts/live-mobile-dark.png',import.meta.url).pathname,fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ await page.goto(base+'/personen/'+person.id);await page.getByRole('heading',{name:'Spielhistorie'}).waitFor();await page.screenshot({path:new URL('../test-artifacts/person-mobile-dark.png',import.meta.url).pathname,fullPage:true});
+ await page.goto(base+'/statistik?year=2025');assert.match(await page.locator('tbody').innerText(),/Noch keine freigegebenen/);await page.goto(base+'/statistik');assert.equal(await page.locator('tbody tr').count(),2);
+ const {configureSite}=await import('../src/site-control.js');await configureSite(1,{password:'Browser test password!',methods:['password']},'smoke-site');await page.goto(base+'/statistik');await page.waitForURL('**/login');await page.getByLabel('Seitenpasswort',{exact:true}).fill('Browser test password!');await page.getByLabel('30 Tage angemeldet bleiben').check();await page.getByRole('button',{name:'Anmelden',exact:true}).click();await page.waitForURL(base+'/');const sessionCookie=(await page.context().cookies()).find(c=>c.name==='ftb-session');assert.ok(sessionCookie?.httpOnly);await page.getByRole('button',{name:'Abmelden',exact:true}).click();await page.waitForURL('**/login');await configureSite(1,{methods:[]},'smoke-public-again');
  await page.setViewportSize({width:1440,height:1000});await page.goto(`http://127.0.0.1:${demo.address().port}/`);
  await page.getByRole('button',{name:'Meine Spiele',exact:true}).click();
  await page.locator('.msg').last().getByRole('button',{name:'Treffer +1',exact:true}).click();

@@ -11,13 +11,14 @@ let db,stop;
 before(async()=>{({db,stop}=await database());});
 after(async()=>{await stop();});
 beforeEach(async()=>{
- await db.query('TRUNCATE teams,people,staff,fields,turbo_sessions,match_ops,match_roster,metric_events,join_requests,login_limits,operation_requests,audit_log,event_control RESTART IDENTITY CASCADE');
+ await db.query('TRUNCATE site_sessions,site_accounts,site_challenges,teams,people,staff,fields,turbo_sessions,match_ops,match_roster,metric_events,join_requests,login_limits,operation_requests,audit_log,event_control RESTART IDENTITY CASCADE');
  await db.query('INSERT INTO event_control(id) VALUES(1)');
  await db.query("INSERT INTO staff(telegram_id,display_name,role) VALUES(1,'Admin','admin'),(2,'Leitung','lead'),(3,'Helfer','helper'),(4,'Helfer zwei','helper')");
  await db.query('UPDATE settings SET winner_team_id=NULL,tournament_finished=false');
 });
 let seq=0;const key=()=>`test-${++seq}`;
 async function fixture({guest=false}={}){
+ await db.query("UPDATE event_control SET mode='turbo' WHERE id=1");
  const alice=await setup(1,'person_add',{name:'Alice'},key()),bob=await setup(1,'person_add',{name:'Bob'},key());
  await setup(1,'person_link',{userId:'3',personId:alice.id},key());await setup(1,'person_link',{userId:'4',personId:bob.id},key());
  const field=await setup(1,'field_add',{name:'Feld Nord'},key());
@@ -200,7 +201,86 @@ test('Telegram wizard creates a round-local guest using names and buttons',async
  const click=async label=>{const b=messages.at(-1).options.reply_markup.inline_keyboard.flat().find(x=>x.text===label);assert.ok(b,`Button ${label}`);await controller.onCallback(q(b.callback_data));};
  await controller.onCallback(q('turbo:'+f.session.id+':manual'));await click('Alice');await click('Auswahl übernehmen');
  await controller.onMessage({message_id:44,from:{id:2},chat:{id:2,type:'private'},text:'Gast nur jetzt'});
- await click('Bob');await click('Auswahl übernehmen');await click('Überspringen');await click('Helfer');
+ await click('Bob');await click('Auswahl übernehmen');await click('Überspringen');await click('Überspringen');await click('Helfer');
  assert.match(messages.at(-1).text,/Alice/);assert.match(messages.at(-1).text,/Bob/);await click('Speichern');
  const newest=(await db.query('SELECT id FROM match_ops ORDER BY id DESC LIMIT 1')).rows[0];const m=await getMatch(newest.id);assert.equal(m.status,'planned');assert.equal(m.roster.filter(r=>r.guest_name).length,1);assert.equal(m.roster.find(r=>r.guest_name).guest_name,'Gast nur jetzt');
+});
+
+test('mode switches are admin-only, persist and refuse occupied fields',async()=>{
+ const {configureSite,siteConfig}=await import('../src/site-control.js');
+ await assert.rejects(()=>configureSite(2,{mode:'turbo'},key()),/Administrator/);
+ await configureSite(1,{mode:'turbo'},key());await migrate();assert.equal((await siteConfig()).mode,'turbo');
+ const f=await fixture();await assert.rejects(()=>configureSite(1,{mode:'classic'},key()),/abschließen/);
+ await matchAction(1,f.game.id,'cancel',{reason:'Test beendet'},key());await configureSite(1,{mode:'classic'},key());
+ const wrong=await createTurbo(1,{sessionId:f.session.id,sideA:[{personId:f.alice.id}],sideB:[{personId:f.bob.id}]},key());
+ await assert.rejects(()=>matchAction(1,wrong.id,'assign',{fieldId:f.field.id,helperId:1},key()),/anderen Instanzmodus/);
+});
+test('year and day filters count only approved appearances, guests and exports in the selected period',async()=>{
+ const f=await fixture({guest:true});await db.query("UPDATE match_ops SET played_on='2025-12-31' WHERE id=$1",[f.game.id]);
+ await matchAction(1,f.game.id,'report',{side:'A'},key());await matchAction(1,f.game.id,'approve',{},key());
+ let s=await turboStats(null,db,{year:'2026'});assert.equal(s.rows.length,0);assert.equal(s.guests.played,0);
+ s=await turboStats(null,db,{year:'2025',day:'2025-12-31'});assert.equal(s.rows.length,2);assert.equal(s.guests.played,1);assert.equal(s.rows[0].qualified,false);assert.match(statisticsCsv(s),/Spieltag 2025-12-31/);
+ await assert.rejects(()=>turboStats(null,db,{year:'2026',day:'2025-12-31'}),/passt nicht/);
+});
+test('public live data hides pending winners and exposes preliminary metrics without staff identities',async()=>{
+ const f=await fixture({guest:true}),m=await getMatch(f.game.id);await metricAction(1,m.id,m.roster[0].id,'hits','add',key());await matchAction(1,m.id,'report',{side:'A'},key());
+ const {app}=await import('../src/index.js'),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));try{
+  const base=`http://127.0.0.1:${server.address().port}`,r=await fetch(base+'/api/live'),data=await r.json();assert.match(data.fieldsHtml,/Werte vorläufig/);assert.match(data.fieldsHtml,/Treffer/);assert.ok(!data.fieldsHtml.includes('Gewonnen:'));assert.ok(!JSON.stringify(data).includes('telegram_id'));
+  await matchAction(1,m.id,'approve',{},key());assert.match((await fetch(base+'/api/live').then(r=>r.json())).fieldsHtml,/Wartet auf die nächste/);
+ }finally{await new Promise(r=>server.close(r));}
+});
+async function loginServer(fn){
+ process.env.ALLOW_HTTP_TEST='1';const {app}=await import('../src/index.js'),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ try{await fn(`http://127.0.0.1:${server.address().port}`);}finally{await new Promise(r=>server.close(r));delete process.env.TELEGRAM_BOT_USERNAME;}
+}
+const cookiePair=r=>(r.headers.getSetCookie?.()||[]).map(x=>x.split(';')[0]).join('; ');
+const formToken=html=>/name="csrf" value="([\w-]+)"/.exec(html)?.[1]||/name="csrf-token" content="([\w-]+)"/.exec(html)?.[1];
+test('combined website login protects exports, remembers sessions, prevents CSRF and revokes accounts',async()=>{
+ const {configureSite,saveSiteAccount}=await import('../src/site-control.js');await configureSite(1,{password:'Shared website password!',methods:['password','account']},key());
+ await saveSiteAccount(1,{username:'visitor',password:'Private account password!'},key());assert.equal(await actor(77),undefined);
+ await loginServer(async base=>{
+  const locked=await fetch(base+'/statistik/gesamt.csv',{redirect:'manual'});assert.equal(locked.status,302);assert.equal(locked.headers.get('location'),'/login');
+  const form=await fetch(base+'/login'),html=await form.text(),cookie=cookiePair(form),csrf=formToken(html);
+  assert.equal((await fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({method:'account',username:'visitor',password:'Private account password!'}),redirect:'manual'})).status,403);
+  const login=await fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded',origin:base},body:new URLSearchParams({csrf,method:'account',username:'visitor',password:'Private account password!',remember:'1'}),redirect:'manual'});assert.equal(login.status,303);assert.match(login.headers.get('set-cookie'),/HttpOnly/);assert.match(login.headers.get('set-cookie'),/Max-Age=2592000/);
+  const session=cookiePair(login);assert.equal((await fetch(base+'/statistik/gesamt.csv',{headers:{cookie:session}})).status,200);
+  const account=(await db.query("SELECT id FROM site_accounts WHERE username='visitor'")).rows[0];await saveSiteAccount(1,{id:account.id,active:false},key());assert.equal((await fetch(base+'/',{headers:{cookie:session},redirect:'manual'})).status,302);
+  const publicAgain=await configureSite(1,{methods:[]},key());assert.ok(publicAgain);assert.equal((await fetch(base+'/')).status,200);
+ });
+});
+test('Telegram website login requires allowed identity, explicit consent and the initiating browser',async()=>{
+ const {configureSite,saveSiteAccount}=await import('../src/site-control.js');const {confirmWebLogin}=await import('../src/site-auth.js');
+ await configureSite(1,{methods:['telegram']},key());await saveSiteAccount(1,{username:'telegram-viewer',telegramId:'77'},key());process.env.TELEGRAM_BOT_USERNAME='FtbTestBot';
+ await loginServer(async base=>{
+  const r=await fetch(base+'/login'),csrf=formToken(await r.text()),cookie=cookiePair(r);
+  const start=await fetch(base+'/login/telegram',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded',origin:base},body:new URLSearchParams({csrf,remember:'1'})});const html=await start.text(),token=/data-token="([\w-]+)"/.exec(html)?.[1];assert.ok(token);assert.match(html,/web_local_/);
+  await assert.rejects(()=>confirmWebLogin(token,78,true),/freigegeben/);await confirmWebLogin(token,77,false);
+  const check=extra=>fetch(base+'/login/telegram/check',{method:'POST',headers:{cookie:extra,'Content-Type':'application/x-www-form-urlencoded',origin:base},body:new URLSearchParams({csrf,token})});
+  const bound=cookie+'; '+cookiePair(start);assert.deepEqual(await check(bound).then(r=>r.json()),{ready:false});await confirmWebLogin(token,77,true);
+  assert.equal((await check(cookie)).status,403);const finish=await check(bound);assert.deepEqual(await finish.json(),{ready:true});assert.ok(cookiePair(finish).includes('ftb-session='));assert.deepEqual(await check(bound).then(r=>r.json()),{ready:false});
+ });
+});
+test('website brute-force limits survive new clients and rotation invalidates shared sessions',async()=>{
+ const {configureSite}=await import('../src/site-control.js');const {reserveLogin}=await import('../src/site-auth.js');
+ for(let i=0;i<8;i++)assert.equal(await reserveLogin('limit-test'),true);assert.equal(await reserveLogin('limit-test'),false);assert.equal(Number((await db.query("SELECT count FROM login_limits WHERE key='site:global'")).rows[0].count),8);
+ await configureSite(1,{password:'Shared password old!',methods:['password']},key());await loginServer(async base=>{
+  const r=await fetch(base+'/login'),csrf=formToken(await r.text()),cookie=cookiePair(r);
+  const login=await fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,method:'password',password:'Shared password old!'}),redirect:'manual'});assert.equal(login.status,303);assert.ok(!login.headers.get('set-cookie').includes('Max-Age'));
+  const session=cookiePair(login);await configureSite(1,{password:'Shared password new!'},key());assert.equal((await fetch(base+'/',{headers:{cookie:session},redirect:'manual'})).status,302);
+ });
+});
+test('gateway binds old buttons to their originating instance and user across switches and restarts',async()=>{
+ const {createGateway,parseInstances}=await import('../src/gateway.js');
+ const instances=parseInstances(JSON.stringify([{id:'one',name:'Erste',url:'http://one:3000',secret:'a'.repeat(48)},{id:'two',name:'Zweite',url:'http://two:3000',secret:'b'.repeat(48)}]));
+ const messages=[],forwarded=[],bot={sendMessage:async(...args)=>{messages.push(args);return {message_id:1};},answerCallbackQuery:async()=>{}};
+ const request=async(url,options)=>{forwarded.push({url,body:JSON.parse(options.body)});return {ok:true};};
+ const gateway=await createGateway({bot,pool:db,instances,request});const server=gateway.app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ const from={id:1},message={chat:{id:1,type:'private'},message_id:2};try{
+  const r=await fetch(`http://127.0.0.1:${server.address().port}/rpc/one`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+instances[0].secret},body:JSON.stringify({method:'sendMessage',args:[1,'Spiel prüfen',{reply_markup:{inline_keyboard:[[{text:'Freigeben',callback_data:'approve:12:2'}]]}}]})});assert.equal(r.status,200);const old=messages.at(-1)[2].reply_markup.inline_keyboard[0][0].callback_data;assert.ok(Buffer.byteLength(old)<=64);assert.match(messages.at(-1)[1],/Erste/);
+  await gateway.onCallback({id:'select',from,message,data:'select:two'});assert.match(forwarded.at(-1).url,/two/);
+  const restarted=await createGateway({bot,pool:db,instances,request});await restarted.onCallback({id:'old',from,message,data:old});assert.match(forwarded.at(-1).url,/one/);assert.equal(forwarded.at(-1).body.payload.data,'approve:12:2');
+  const before=forwarded.length;await restarted.onCallback({id:'stolen',from:{id:2},message:{chat:{id:2,type:'private'}},data:old});assert.equal(forwarded.length,before);
+  await restarted.onMessage({from,message_id:3,chat:message.chat,text:'/start web_one_'+'x'.repeat(32)});assert.match(forwarded.at(-1).url,/one/);
+  const forbidden=await fetch(`http://127.0.0.1:${server.address().port}/rpc/one`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal(forbidden.status,403);
+ }finally{await new Promise(r=>server.close(r));}
 });

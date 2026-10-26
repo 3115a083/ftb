@@ -1,3 +1,6 @@
+import { remoteBot } from './bot-transport.js';
+import { siteConfig, configureSite, saveSiteAccount } from './site-control.js';
+import { confirmWebLogin } from './site-auth.js';
 import TelegramBot from 'node-telegram-bot-api';
 import { randomBytes } from 'node:crypto';
 import { db } from './db.js';
@@ -31,9 +34,9 @@ export function createBotController(bot){
  async function home(chat,id){
   const a=await actor(id);
   if(!a)return send(chat,'FTB: Melde dich mit dem Veranstaltungspasswort an. Die Turnierleitung muss deinen Zugang anschließend freigeben.',[[button('Als Helfer anmelden','join')]]);
-  const matches=await listMatches(),own=matches.filter(m=>String(m.helper_id)===String(id)||m.roster.some(r=>r.person_id&&r.person_id===a.person_id));
+  const config=await siteConfig(),matches=(await listMatches()).filter(m=>config.mode==='turbo'?m.session_id:m.game_id),own=matches.filter(m=>String(m.helper_id)===String(id)||m.roster.some(r=>r.person_id&&r.person_id===a.person_id));
   const rows=[[button('Meine Spiele','list:mine:0'),button('Spielplan & Tabellen','overview')]];
-  let text=`FTB · ${a.display_name}\nRolle: ${{admin:'Administration',lead:'Turnierleitung',helper:'Helfer'}[a.role]}\n${own.filter(m=>BUSY.includes(m.status)).length} eigene aktive Begegnungen`;
+  let text=`FTB · ${config.mode==='turbo'?'Turbo':'Teamturnier'} · ${a.display_name}\nRolle: ${{admin:'Administration',lead:'Turnierleitung',helper:'Helfer'}[a.role]}\n${own.filter(m=>BUSY.includes(m.status)).length} eigene aktive Begegnungen`;
   if(LEADS.includes(a.role)){const count=matches.filter(m=>m.status==='pending').length;text+=`\n${count} Ergebnisfreigaben offen`;rows.unshift([button(`Freigaben (${count})`,'list:pending:0'),button('Spielfelder','fields')]);rows.push([button('Spielbetrieb','list:active:0'),button('Turnier','tournament')],[button('Seite verwalten','page'),button('Verwaltung','manage')]);}
   rows.push([button('Hilfe','help')]);return send(chat,text,rows);
  }
@@ -55,6 +58,7 @@ export function createBotController(bot){
   if(choices)rows.push(...pagination('form:page:'+f.nonce,f.page||0,choices.length));
   if(field.type==='multi')rows.push([button('Auswahl übernehmen',`form:next:${f.nonce}`)]);
   if(field.type==='rules')rows.push([button('Regelwerk übernehmen',`form:next:${f.nonce}`)]);
+  if(f.values[field.key]!=null&&!choices)rows.push([button('Vorbelegung übernehmen',`form:keep:${f.nonce}`)]);
   if(field.optional)rows.push([button(field.type==='photo'?'Kein Logo / Logo entfernen':'Überspringen',`form:skip:${f.nonce}`)]);
   rows.push([button('Zurück',`form:back:${f.nonce}`),button('Abbrechen','abort')]);
   return send(chat,`${f.title}\nSchritt ${f.step+1}/${f.fields.length}: ${field.label}${field.hint?'\n'+field.hint:''}`,rows);
@@ -64,7 +68,7 @@ export function createBotController(bot){
   const a=await actor(id);if(f.role==='lead')lead(a);if(f.role==='admin')requireThat(a?.role==='admin','Keine Berechtigung.');
   const field=f.fields[f.step];requireThat(field,'Bitte Speichern oder Verwerfen wählen.');
   let value=message.text||'';
-  if(field.secret){await bot.deleteMessage(chat,message.message_id).catch(()=>{});drafts.delete(String(id));return f.submit({[field.key]:value},`msg:${chat}:${message.message_id}`);}
+  if(field.secret){await bot.deleteMessage(chat,message.message_id).catch(()=>{});drafts.delete(String(id));return f.submit({...f.values,[field.key]:value},`msg:${chat}:${message.message_id}`);}
   if(field.type==='photo'){
    const photo=message.photo?.at(-1);requireThat(photo&&photo.file_size<=2000000,'Bitte ein Foto mit höchstens 2 MB senden.');
    const url=await bot.getFileLink(photo.file_id);const u=new URL(url);requireThat(u.protocol==='https:'&&u.hostname==='api.telegram.org','Ungültiger Datei-Endpunkt.');
@@ -87,6 +91,7 @@ export function createBotController(bot){
    const result=await f.submit(f.values,key);drafts.delete(String(id));return result;
   }
   requireThat(field,'Dialog bereits abgeschlossen.');
+  if(action==='keep'){requireThat(f.values[field.key]!=null,'Keine Vorbelegung.');f.step++;f.page=0;return prompt(chat,id);}
   if(action==='pick'){
    const choices=typeof field.choices==='function'?await field.choices(f.values):field.choices;const selected=choices?.[num(index)];requireThat(selected,'Auswahl nicht mehr verfügbar.');
    if(field.type==='multi'){const values=f.values[field.key]||[];f.values[field.key]=values.includes(selected.value)?values.filter(x=>x!==selected.value):[...values,selected.value];return prompt(chat,id);}
@@ -96,7 +101,7 @@ export function createBotController(bot){
   return prompt(chat,id);
  }
  async function showList(chat,id,filter='active',page=0){
-  const a=await actor(id);requireThat(a,'Keine Berechtigung.');const all=await listMatches();
+  const a=await actor(id);requireThat(a,'Keine Berechtigung.');const config=await siteConfig(),all=(await listMatches()).filter(m=>config.mode==='turbo'?m.session_id:m.game_id);
   const matches=all.filter(m=>filter==='mine'?(String(m.helper_id)===String(id)||m.roster.some(r=>r.person_id&&r.person_id===a.person_id)):filter==='active'?BUSY.includes(m.status):filter==='pending'?m.status==='pending':filter==='planned'?m.status==='planned':filter==='finished'?['finished','cancelled'].includes(m.status):true);
   const offset=page*8,rows=matches.slice(offset,offset+8).map(m=>[button(`${LABELS[m.status]} · ${clipped(title(m))}`,`match:${m.id}`)]);
   if(page>0)rows.push([button('Vorherige',`list:${filter}:${page-1}`)]);if(offset+8<matches.length)rows.push([button('Weitere',`list:${filter}:${page+1}`)]);
@@ -107,10 +112,12 @@ export function createBotController(bot){
   const a=await actor(id);requireThat(a,'Keine Berechtigung.');const m=await getMatch(matchId),isLead=LEADS.includes(a.role),controller=isLead||String(m.helper_id)===String(id),participant=m.session_id&&m.roster.some(r=>r.person_id&&r.person_id===a.person_id);
   const values=await metricValues(m.id),config=(await db.query(m.session_id?'SELECT metrics FROM turbo_sessions WHERE id=$1':'SELECT metrics FROM event_control WHERE id=$1',[m.session_id||1])).rows[0];
   let text=`${title(m)}\n${m.field_name||'Kein Feld'} · ${LABELS[m.status]}\nBetreuung: ${m.helper_name||'Noch nicht zugewiesen'}\nRunde ${m.current_round}`;
+  if(m.session_id){const sizeA=m.roster.filter(r=>r.side==='A').length,sizeB=m.roster.filter(r=>r.side==='B').length;text+=`\nBesetzung: ${sizeA} gegen ${sizeB}${sizeA!==sizeB?' · Unterschiedliche Seitengrößen, vor dem Start prüfen.':''}\nSpieltag: ${String(m.played_on).slice(0,10)}`;}
   if(m.reason)text+='\nHinweis: '+m.reason;
   if(m.winning_side)text+='\n'+(m.status==='finished'?'Freigegebener':'Gemeldeter')+' Gewinner: '+sideName(m,m.winning_side);
   for(const r of m.roster){text+='\n\n'+r.name+(r.guest_name?' (Gast, nur diese Begegnung)':'');for(const k of config.metrics){const v=values.find(x=>x.subject_id===r.id&&x.metric===k)?.total;text+=`\n${METRICS[k].label}: ${v??'Nicht erfasst'}`;}}
   const rows=[];
+  if(m.session_id&&isLead)rows.push([button('Besetzung als Vorlage',`turbo_repeat:${m.id}`)]);
   if(m.status==='planned'&&isLead)rows.push([button('Feld & Helfer zuweisen',`assign:${m.id}`)]);
   if(m.status==='assigned'&&controller)rows.push([button('Spiel starten',`do:start:${m.id}:${m.version}`)]);
   if(m.status==='live'&&controller)rows.push([button('Spiel pausieren',`do:pause:${m.id}:${m.version}`)]);
@@ -137,19 +144,36 @@ export function createBotController(bot){
  async function overview(chat,id){requireThat(await actor(id),'Keine Berechtigung.');const tables=await standings();return send(chat,tables.map(g=>`Gruppe ${g.group}\n${g.teams.map(t=>`${t.disqualified?'DQ':t.place+'.'} ${t.name}: ${t.wins} Siege, ${t.losses} Niederlagen${t.tie_unresolved?' · Gleichstand':''}`).join('\n')}`).join('\n\n')||'Noch keine Gruppen.',[[button('Spielplan','list:all:0'),button('Turbo-Statistik','sessions')],back()]);}
  async function page(chat,id){lead(await actor(id));return send(chat,'Seite verwalten',[[button('Ersteinrichtung','p:onboarding')],[button('Titel','p:title'),button('Beschreibung','p:description')],[button('Farben','p:branding'),button('Seitenlogo','p:logo')],[button('Laufbanner setzen','p:ticker'),button('Banner aus','p:banner_off')],[button('Regelwerk','p:rules'),button('Regelwerk-PDF','export:rules:0')],[button('Sponsoren','sponsors')],back()]);}
  async function fields(chat,id){lead(await actor(id));const rows=(await db.query('SELECT * FROM fields ORDER BY id')).rows;return send(chat,'Spielfelder', [...rows.map(x=>[button(`${x.name} · ${x.closed?'geschlossen':'geöffnet'}`,`field:${x.id}`)]),[button('Feld hinzufügen','field_add')],back()]);}
- async function manage(chat,id){lead(await actor(id));return send(chat,'Verwaltung',[[button('Beitrittsanfragen','admissions'),button('Personen & Rollen','staff')],[button('Teilnehmer & Teamzuordnung','people'),button('Spielfelder','fields')],[button('Veranstaltungspasswort','password')],[button('Änderungsverlauf','audit:0'),button('Testdaten','demo')],back()]);}
- async function tournament(chat,id){lead(await actor(id));return send(chat,'Turnier verwalten',[[button('Teams','teams'),button('Gruppen & Spielplan','groups')],[button('K.-o.-Phase','knockout'),button('Finalmodus','p:final_mode')],[button('Wertung & Metriken','classic_metrics')],[button('Turbo-Modus','sessions'),button('Turnier-PDF','export:tournament:0')],back()]);}
+ async function manage(chat,id){const a=await actor(id);lead(a);return send(chat,'Verwaltung',[...(a.role==='admin'?[[button('Instanz & Website-Zugang','webconfig')]]:[]),[button('Beitrittsanfragen','admissions'),button('Personen & Rollen','staff')],[button('Teilnehmer & Teamzuordnung','people'),button('Spielfelder','fields')],[button('Veranstaltungspasswort','password')],[button('Änderungsverlauf','audit:0'),button('Testdaten','demo')],back()]);}
+ async function tournament(chat,id){lead(await actor(id));if((await siteConfig()).mode==='turbo')return callback({id:'turbo-menu',from:{id},message:{chat:{id:chat,type:'private'}},data:'sessions'});return send(chat,'Turnier verwalten',[[button('Teams','teams'),button('Gruppen & Spielplan','groups')],[button('K.-o.-Phase','knockout'),button('Finalmodus','p:final_mode')],[button('Wertung & Metriken','classic_metrics')],[button('Turnier-PDF','export:tournament:0')],back()]);}
  const finish=(chat,id,text='Gespeichert.')=>send(chat,text,[back()]);
  const simple=(chat,id,title,fields,submit,extra={})=>ask(chat,id,{title,fields,role:'lead',submit:async(v,k)=>{await submit(v,k);return finish(chat,id);},...extra});
  const peopleChoices=async()=> (await db.query('SELECT id,name FROM people WHERE active ORDER BY name,id')).rows.map(x=>({label:x.name,value:x.id}));
  const guestList=v=>v?String(v).split(',').map(x=>cleanName(x)).filter(Boolean):[];
+ async function websiteSettings(chat,id,p,a){
+  requireThat(a?.role==='admin','Nur Administratoren.');const config=await siteConfig();
+  const save=(v,k)=>configureSite(id,{...v,version:config.site_version},k);
+  if(p[0]==='webconfig')return send(chat,`Instanz: ${config.mode==='turbo'?'Turbo':'Teamturnier'}\nZeitzone: ${config.timezone}\nWebsite: ${config.site_methods.join(', ')||'öffentlich'}\nMindestspiele Jahreswertung: ${config.turbo_min_games}`,[[button('Modus wählen','wc:mode'),button('Zeitzone','wc:timezone')],[button('Anmeldearten kombinieren','wc:methods')],[button('Seitenpasswort ändern','wc:password')],[button('Website-Benutzer','webusers')],[button('Mindestspiele Jahreswertung','wc:minGames')],[button('Alle Website-Sitzungen widerrufen','wc:revoke')],back('manage')]);
+  if(p[0]==='webusers'){const users=(await db.query('SELECT id,username,active FROM site_accounts ORDER BY id')).rows;const page=num(p[1]||0);return send(chat,'Website-Zugänge vergeben keine Verwaltungsrechte.',[...users.slice(page*8,page*8+8).map(u=>[button(u.username+(u.active?' · aktiv':' · gesperrt'),`webuser:${u.id}:${u.active?'off':'on'}`)]),...pagination('webusers',page,users.length),[button('Passwortkonto anlegen / ändern','wc:account'),button('Telegram-ID freigeben','wc:telegram')],back('webconfig')]);}
+  if(p[0]==='webuser')return simple(chat,id,'Website-Zugang ändern',[],(v,k)=>saveSiteAccount(id,{id:num(p[1]),active:p[2]==='on'},k),{role:'admin',summary:()=>`Konto ${p[1]} ${p[2]==='on'?'aktivieren':'sperren und Sitzungen widerrufen'}.`});
+  if(p[1]==='mode')return simple(chat,id,'Instanzmodus wählen',[{key:'mode',label:'Modus',choices:[{label:'Teamturnier',value:'classic'},{label:'Turbo',value:'turbo'}]}],save,{role:'admin',summary:v=>`Website und Bot zeigen ${v.mode==='turbo'?'Turbo':'Teamturnier'}. Ein Wechsel ist nur ohne laufende oder zugewiesene Spiele möglich. Bestehende Daten bleiben erhalten.`});
+  if(p[1]==='timezone')return simple(chat,id,'Zeitzone',[{key:'timezone',label:'IANA-Zeitzone, z. B. Europe/Berlin'}],save,{role:'admin'});
+  if(p[1]==='methods')return simple(chat,id,'Website-Zugang',[{key:'methods',label:'Anmeldearten, leer = öffentlich',type:'multi',optional:true,choices:[{label:'Gemeinsames Seitenpasswort',value:'password'},{label:'Benutzername und Passwort',value:'account'},{label:'Telegram mit Browser-Bestätigung',value:'telegram'}]}],save,{role:'admin',initial:{methods:config.site_methods},summary:v=>`Zugang: ${(v.methods||[]).join(', ')||'Öffentlich ohne Anmeldung'}. Alle bisherigen Browser-Sitzungen werden widerrufen. PDF und CSV erhalten denselben Zugangsschutz.`});
+  if(p[1]==='password')return ask(chat,id,{role:'admin',title:'Seitenpasswort ändern',fields:[{key:'password',label:'12 bis 200 Zeichen, Nachricht wird gelöscht. Getrennt vom Helferpasswort.',secret:true}],submit:async(v,k)=>{await save(v,k);return finish(chat,id,'Seitenpasswort geändert. Browser-Sitzungen widerrufen. Anmeldeart bei Bedarf aktivieren.');}});
+  if(p[1]==='minGames')return simple(chat,id,'Jahreswertung',[{key:'minGames',label:'Mindestspiele im gewählten Zeitraum: 1 bis 1000',parse:num}],save,{role:'admin'});
+  if(p[1]==='revoke')return simple(chat,id,'Website-Sitzungen widerrufen',[],save,{role:'admin',summary:()=> 'Alle Besucher müssen sich erneut anmelden.'});
+  if(p[1]==='account'||p[1]==='telegram')return ask(chat,id,{role:'admin',title:'Website-Zugang',fields:[{key:'username',label:'Benutzername: a-z, 0-9, Punkt, Bindestrich, Unterstrich'},...(p[1]==='telegram'?[{key:'telegramId',label:'Numerische Telegram-ID'}]:[{key:'password',label:'Neues Passwort: 12 bis 200 Zeichen. Nachricht wird gelöscht.',secret:true}])],submit:async(v,k)=>{await saveSiteAccount(id,v,k);return finish(chat,id,'Website-Zugang gespeichert. Die passende Anmeldeart muss aktiviert sein.');}});
+ }
  async function callback(q){
   const m=q.message,id=q.from.id,chat=m?.chat?.id;if(!privateMessage({...m,from:q.from}))return;
   await bot.answerCallbackQuery(q.id).catch(()=>{});
-  const data=q.data||'';requireThat(Buffer.byteLength(data)<=64,'Ungültige Aktion.');const p=data.split(':'),a=await actor(id);
+  const data=q.data||'';
+  if(data.startsWith('wl:')){await confirmWebLogin(data.slice(3),id,true);return send(chat,'Website-Anmeldung bestätigt. Kehre zum Browser zurück.');}
+  requireThat(Buffer.byteLength(data)<=64,'Ungültige Aktion.');const p=data.split(':'),a=await actor(id);
   if(p[0]==='join')return ask(chat,id,{title:'Als Helfer anmelden',fields:[{key:'password',label:'Veranstaltungspasswort als private Nachricht senden.',secret:true}],submit:async v=>{const ok=await requestAdmission(q.from,v.password);if(ok)await notify(`Neue Beitrittsanfrage: ${q.from.first_name||'Helfer'}. Bitte Person prüfen und freigeben.`);return send(chat,ok?'Anfrage übermittelt. Die Turnierleitung muss dich persönlich freigeben.':'Anmeldung nicht möglich. Bitte später erneut versuchen.',[back()]);}});
   if(p[0]==='abort'){drafts.delete(String(id));return home(chat,id);}
   if(p[0]==='form')return formCallback(chat,id,p,'callback:'+q.id);
+  if(p[0]==='home'&&!a)return home(chat,id);
   requireThat(a,'Bitte zuerst anmelden.');
   if(draftFor(id))drafts.delete(String(id));
   if(p[0]==='home')return home(chat,id);
@@ -160,6 +184,7 @@ export function createBotController(bot){
   if(p[0]==='overview')return overview(chat,id);
   if(p[0]==='page')return page(chat,id);
   if(p[0]==='manage')return manage(chat,id);
+  if(p[0]==='webconfig'||p[0]==='wc'||p[0]==='webusers'||p[0]==='webuser')return websiteSettings(chat,id,p,a);
   if(p[0]==='tournament')return tournament(chat,id);
   if(p[0]==='metric'){await metricAction(id,num(p[1]),num(p[2]),p[3],p[4],'callback:'+q.id);return showMatch(chat,id,num(p[1]),num(p[2]),m.message_id);}
   if(p[0]==='winner'){
@@ -225,24 +250,28 @@ export function createBotController(bot){
    lead(a);const x=await getMatch(num(p[1])),users=(await db.query('SELECT telegram_id,display_name,person_id FROM staff WHERE person_id=ANY($1::int[]) AND role<>\'revoked\'',[x.roster.filter(r=>r.person_id).map(r=>r.person_id)])).rows;
    return simple(chat,id,'Rundenzähler wählen',[{key:'userId',label:'Beteiligte Person',choices:users.map(u=>({label:u.display_name,value:u.telegram_id}))}],(v,k)=>matchAction(id,x.id,'coordinator',v,k));
   }
+  if(p[0]==='annual'){const stats=await turboStats(null);return send(chat,`${stats.session.name}\nMindestspiele: ${stats.session.min_games}\n${stats.rows.map(r=>`${r.place??'–'} ${r.name}: ${r.played} Spiele, ${r.wins} Siege`).join('\n')}`,[[button('Zeitraum / Export','period:gesamt')],back('sessions')]);}
+  if(p[0]==='period'){return ask(chat,id,{title:'Statistikzeitraum',fields:[{key:'year',label:'Jahr (z. B. 2026) oder all',parse:v=>{requireThat(v==='all'||/^\d{4}$/.test(v),'Jahr oder all eingeben.');return v;}},{key:'day',label:'Optionaler Spieltag YYYY-MM-DD',optional:true},{key:'format',label:'Dateiformat',choices:[{label:'PDF',value:'pdf'},{label:'CSV',value:'csv'}]}],submit:async v=>{const stats=await turboStats(p[1]==='gesamt'?null:num(p[1]),db,v);return bot.sendDocument(chat,v.format==='pdf'?await statisticsPdf(stats):Buffer.from(statisticsCsv(stats)),{},{filename:'statistik.'+v.format,contentType:v.format==='pdf'?'application/pdf':'text/csv'});}});}
   if(p[0]==='sessions'){
-   const pageIndex=num(p[1]||0);const sessions=(await db.query('SELECT * FROM turbo_sessions ORDER BY id DESC ')).rows;return send(chat,'Turbo-Sitzungen',[...sessions.slice(pageIndex*8,pageIndex*8+8).map(s=>[button(s.name+(s.finished?' · beendet':''),`session:${s.id}`)]),...(LEADS.includes(a.role)?[[button('Turbo-Turnier starten','session_add')]]:[]),...pagination('sessions',pageIndex,sessions.length),back()]);
+   const pageIndex=num(p[1]||0);const sessions=(await db.query('SELECT * FROM turbo_sessions ORDER BY id DESC ')).rows;return send(chat,'Turbo-Sitzungen',[[button('Jahresrangliste','annual')],...sessions.slice(pageIndex*8,pageIndex*8+8).map(s=>[button(s.name+(s.finished?' · beendet':''),`session:${s.id}`)]),...(LEADS.includes(a.role)?[[button('Turbo-Turnier starten','session_add')]]:[]),...pagination('sessions',pageIndex,sessions.length),back()]);
   }
   if(p[0]==='session_add')return simple(chat,id,'Turbo-Turnier starten',[{key:'name',label:'Name'},{key:'minGames',label:'Mindestspiele für Rangliste (1 bis 1000)',parse:num}],(v,k)=>setup(id,'session_add',v,k));
   if(p[0]==='session'){
    const stats=await turboStats(num(p[1]));return send(chat,`${stats.session.name}\nMindestspiele: ${stats.session.min_games}\n${stats.rows.map(r=>`${r.place??'–'} ${r.name}: ${r.played} Spiele, ${r.wins} Siege${r.qualified?'':' · noch ungewertet'}`).join('\n')}\nGäste: ${stats.guests.played} gemeinsame Einsätze`,[
-    ...(LEADS.includes(a.role)&&!stats.session.finished?[[button('Spiel zusammenstellen',`turbo:${p[1]}:manual`),button('Zusammensetzung vorschlagen',`turbo:${p[1]}:shuffle`)],[button('Wertung einstellen',`session_config:${p[1]}`),button('Sitzung beenden',`session_finish:${p[1]}`)]]:[]),[button('PDF',`export:stats_pdf:${p[1]}`),button('CSV',`export:stats_csv:${p[1]}`)],back('sessions')]);
+    ...(LEADS.includes(a.role)&&!stats.session.finished?[[button('Spiel zusammenstellen',`turbo:${p[1]}:manual`),button('Zusammensetzung vorschlagen',`turbo:${p[1]}:shuffle`)],[button('Wertung einstellen',`session_config:${p[1]}`),button('Sitzung beenden',`session_finish:${p[1]}`)]]:[]),[button('PDF',`export:stats_pdf:${p[1]}`),button('CSV',`export:stats_csv:${p[1]}`)],[button('Zeitraum / Export',`period:${p[1]}`)],back('sessions')]);
   }
-  if(p[0]==='turbo'){
+  if(p[0]==='turbo'||p[0]==='turbo_repeat'){
    lead(a);const people=await peopleChoices();const shuffled=[...people];for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}
-   const initial=p[2]==='shuffle'?{sideA:shuffled.slice(0,Math.ceil(shuffled.length/2)).map(x=>x.value),sideB:shuffled.slice(Math.ceil(shuffled.length/2)).map(x=>x.value)}:{};
+   let initial=p[2]==='shuffle'?{sideA:shuffled.slice(0,Math.ceil(shuffled.length/2)).map(x=>x.value),sideB:shuffled.slice(Math.ceil(shuffled.length/2)).map(x=>x.value)}:{};
+   let sessionId=num(p[1]);if(p[0]==='turbo_repeat'){const old=await getMatch(num(p[1]));requireThat(old.session_id,'Nur Turbo.');sessionId=old.session_id;initial={sideA:old.roster.filter(r=>r.side==='A'&&r.person_id).map(r=>r.person_id),sideB:old.roster.filter(r=>r.side==='B'&&r.person_id).map(r=>r.person_id),guestA:old.roster.filter(r=>r.side==='A'&&r.guest_name).map(r=>r.guest_name).join(', '),guestB:old.roster.filter(r=>r.side==='B'&&r.guest_name).map(r=>r.guest_name).join(', ')};}
    return simple(chat,id,'Turbo-Begegnung zusammenstellen',[
     {key:'sideA',label:'Seite A: Personen auswählen',type:'multi',optional:true,choices:people},
     {key:'guestA',label:'Gäste für Seite A: Namen durch Komma trennen. Nur für diese Begegnung.',optional:true,max:500},
     {key:'sideB',label:'Seite B: Personen auswählen',type:'multi',optional:true,choices:v=>people.filter(x=>!(v.sideA||[]).includes(x.value))},
     {key:'guestB',label:'Gäste für Seite B: Namen durch Komma trennen. Nur für diese Begegnung.',optional:true,max:500},
+    {key:'playedOn',label:'Spieltag YYYY-MM-DD, überspringen für heute',optional:true,parse:v=>{requireThat(/^\d{4}-\d{2}-\d{2}$/.test(v),'Datum YYYY-MM-DD.');return v;}},
     {key:'coordinatorId',label:'Gemeinsame Runden zählt',choices:async v=>[{label:'Turnierleitung / neutrale Betreuung',value:null},...(await db.query("SELECT s.* FROM staff s WHERE s.person_id=ANY($1::int[]) AND s.role<>'revoked'",[ [...(v.sideA||[]),...(v.sideB||[]) ]])).rows.map(u=>({label:u.display_name,value:u.telegram_id}))]},
-   ],async(v,k)=>{const row=await createTurbo(id,{sessionId:num(p[1]),sideA:[...(v.sideA||[]).map(personId=>({personId})),...guestList(v.guestA).map(guestName=>({guestName}))],sideB:[...(v.sideB||[]).map(personId=>({personId})),...guestList(v.guestB).map(guestName=>({guestName}))],coordinatorId:v.coordinatorId},k);await showMatch(chat,id,row.id);},{initial});
+   ],async(v,k)=>{const row=await createTurbo(id,{sessionId,playedOn:v.playedOn,sideA:[...(v.sideA||[]).map(personId=>({personId})),...guestList(v.guestA).map(guestName=>({guestName}))],sideB:[...(v.sideB||[]).map(personId=>({personId})),...guestList(v.guestB).map(guestName=>({guestName}))],coordinatorId:v.coordinatorId},k);await showMatch(chat,id,row.id);},{initial});
   }
   if(p[0]==='session_config'||p[0]==='classic_metrics'){
    lead(a);const turbo=p[0]==='session_config',current=(await db.query(turbo?'SELECT * FROM turbo_sessions WHERE id=$1':'SELECT * FROM event_control WHERE id=$1',[turbo?num(p[1]):1])).rows[0];
@@ -336,6 +365,7 @@ export function createBotController(bot){
  async function message(m){
   if(!privateMessage(m))return;const id=m.from.id,chat=m.chat.id,text=m.text||'',command=text.match(/^\/(\w+)(?:@\w+)?(?:\s|$)/)?.[1];
   if(command){
+   if(command==='start'&&/^\/start(?:@\w+)? web_/.test(text)){const token=/^\/start(?:@\w+)? web_([a-z0-9-]{1,12})_([\w-]{32})$/.exec(text);requireThat(token&&token[1]===(process.env.INSTANCE_ID||'local'),'Anmeldung gehört zu einer anderen Instanz.');const preview=await confirmWebLogin(token[2],id);return send(chat,`Website-Anmeldung für ${preview.site}\nBrowser-Code: ${preview.code}\nNur bestätigen, wenn du diese Anmeldung selbst im Browser begonnen hast und der Code dort übereinstimmt.`,[[button('Meine Browser-Anmeldung bestätigen','wl:'+token[2])]]);}
    const routes={start:'home',spiele:'list:mine:0',teams:'teams',turnier:'tournament',seite:'page',verwaltung:'manage',hilfe:'help',abbrechen:'abort'};
    if(routes[command]){
     const f=draftFor(id);if(f&&command!=='abbrechen')return send(chat,'Du hast einen ungespeicherten Dialog. Fortsetzen oder verwerfen?',[[button('Dialog fortsetzen',`form:continue:${f.nonce}`)],[button('Verwerfen und Übersicht öffnen','abort')]]);
@@ -353,10 +383,10 @@ export function createBotController(bot){
  return {onCallback:q=>enqueue(q,callback),onMessage:m=>enqueue(m,message),home,drafts};
 }
 export async function startBot(){
- if(!process.env.TELEGRAM_BOT_TOKEN)return null;
- const bot=new TelegramBot(process.env.TELEGRAM_BOT_TOKEN,{polling:true});const controller=createBotController(bot);
- bot.on('callback_query',controller.onCallback);bot.on('message',controller.onMessage);
- bot.on('polling_error',()=>console.error('Telegram-Verbindung fehlgeschlagen.'));
- await bot.setMyCommands([{command:'start',description:'Übersicht und offene Aufgaben'},{command:'spiele',description:'Meine Spiele'},{command:'turnier',description:'Turnier und Turbo-Modus'},{command:'seite',description:'Seite verwalten'},{command:'verwaltung',description:'Personen und Spielfelder'},{command:'hilfe',description:'Bedienhilfe'},{command:'abbrechen',description:'Aktuellen Dialog verwerfen'}]).catch(()=>{});
- return bot;
+ if(!process.env.TELEGRAM_BOT_TOKEN&&!process.env.BOT_GATEWAY_URL)return null;
+ requireThat(!(process.env.TELEGRAM_BOT_TOKEN&&process.env.BOT_GATEWAY_URL),'Bot-Token nur im Gateway setzen oder Standalone-Betrieb wählen.');
+ const remote=Boolean(process.env.BOT_GATEWAY_URL),bot=remote?remoteBot():new TelegramBot(process.env.TELEGRAM_BOT_TOKEN,{polling:true});
+ const controller=createBotController(bot);
+ if(!remote){bot.on('callback_query',controller.onCallback);bot.on('message',controller.onMessage);bot.on('polling_error',()=>console.error('Telegram-Verbindung fehlgeschlagen.'));await bot.setMyCommands([{command:'start',description:'Übersicht und offene Aufgaben'},{command:'spiele',description:'Meine Spiele'},{command:'turnier',description:'Turnier verwalten'},{command:'verwaltung',description:'Verwaltung'},{command:'abbrechen',description:'Dialog verwerfen'}]).catch(()=>{});}
+ let me;try{me=await bot.getMe();}catch{throw Error('Bot-Verbindung fehlgeschlagen. Token und Gateway prüfen.');}return {bot,controller,username:me.username};
 }

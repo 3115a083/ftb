@@ -1,5 +1,7 @@
 # Telegram-Bedienung und Turniermodi
 
+Website, Jahreswertung und gemeinsamer Bot: [Website-Anleitung](website.md).
+
 Die öffentliche Website bleibt lesend. Die Administration findet ausschließlich im privaten Bot-Chat statt. Entwicklung erfolgt im Fork `3115a083/ftb` auf `test`; `main` bleibt stabil.
 
 ## Rollen und Einstieg

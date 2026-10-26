@@ -101,18 +101,22 @@ export async function setup(actorId,action,data,key){return transact(actorId,act
  if(action==='tie_order'){await setTieOrder(data.group,data.ids,c);return {audit:data};}
  throw Error('Unbekannte Aktion.');
 });}
-export async function createTurbo(actorId,{sessionId,sideA,sideB,coordinatorId},key){return transact(actorId,'turbo_created',key,async(c,a)=>{lead(a);
+export async function createTurbo(actorId,{sessionId,sideA,sideB,coordinatorId,playedOn},key){return transact(actorId,'turbo_created',key,async(c,a)=>{lead(a);
  const session=await one(c,'SELECT * FROM turbo_sessions WHERE id=$1 AND NOT finished',[sessionId]);requireThat(session,'Aktive Turbo-Sitzung fehlt.');
  requireThat(Array.isArray(sideA)&&Array.isArray(sideB)&&sideA.length&&sideB.length&&sideA.length+sideB.length<=40,'Beide Seiten brauchen Teilnehmer, insgesamt höchstens 40.');
  const personIds=[...sideA,...sideB].filter(x=>x.personId).map(x=>x.personId);requireThat(new Set(personIds).size===personIds.length,'Person doppelt ausgewählt.');
  for(const id of personIds)requireThat((await c.query('SELECT id FROM people WHERE id=$1 AND active',[id])).rowCount,'Teilnehmer fehlt.');
  if(coordinatorId){const u=await actor(coordinatorId,c);requireThat(u&&personIds.includes(u.person_id),'Rundenzähler muss beteiligt sein.');}
- const m=await one(c,'INSERT INTO match_ops(session_id,coordinator_id) VALUES($1,$2) RETURNING id',[sessionId,coordinatorId||null]);
+ const tz=(await one(c,'SELECT timezone FROM event_control WHERE id=1')).timezone;
+ const day=playedOn||new Intl.DateTimeFormat('sv-SE',{timeZone:tz}).format(new Date());
+ requireThat(/^\d{4}-\d{2}-\d{2}$/.test(day)&&!isNaN(Date.parse(day))&&new Date(day).toISOString().slice(0,10)===day,'Ungültiger Spieltag.');
+ const m=await one(c,'INSERT INTO match_ops(session_id,coordinator_id,played_on) VALUES($1,$2,$3) RETURNING id',[sessionId,coordinatorId||null,day]);
  for(const [side,roster] of [['A',sideA],['B',sideB]])for(const p of roster)await c.query('INSERT INTO match_roster(match_id,side,person_id,guest_name) VALUES($1,$2,$3,$4)',[m.id,side,p.personId||null,p.personId?null:cleanName(p.guestName)]);
  return {id:m.id,audit:{sessionId,matchId:m.id}};
 });}
 export async function matchAction(actorId,id,action,data={},key){return transact(actorId,'match_'+action,key,async(c,a)=>{
  const m=await getMatch(id,c);
+ if(['assign','start'].includes(action)){const mode=(await one(c,'SELECT mode FROM event_control WHERE id=1')).mode;requireThat(mode===(m.session_id?'turbo':'classic'),'Spiel gehört zum anderen Instanzmodus.');}
  if(m.session_id&&action!=='cancel')requireThat(!(await one(c,'SELECT finished FROM turbo_sessions WHERE id=$1',[m.session_id])).finished,'Turbo-Sitzung ist beendet.');
  if(data.version!==undefined)requireThat(m.version===Number(data.version),'Veralteter Button. Bitte den aktuellen Spielstand öffnen.');
  const privileged=LEADS.includes(a.role);
@@ -178,7 +182,7 @@ export async function metricAction(actorId,id,subjectId,metric,kind,key){return 
   requireThat(m.status==='live','Runden nur im laufenden Spiel zählen.');
   requireThat(privileged||String(m.coordinator_id)===String(actorId)||(String(m.helper_id)===String(actorId)&&!m.roster.some(x=>x.person_id&&x.person_id===a.person_id)),'Nur die festgelegte Betreuung zählt die Runden.');requireThat(m.current_round<10000,'Rundenlimit erreicht.');
   await c.query('UPDATE match_ops SET current_round=current_round+1 WHERE id=$1',[m.id]);
-  await c.query("INSERT INTO metric_events(match_id,metric,amount,actor_id) VALUES($1,'round',1,$2)",[m.id,String(actorId)]);return {id:m.id};
+  await c.query("INSERT INTO metric_events(match_id,metric,amount,actor_id,round_no) VALUES($1,'round',1,$2,$3)",[m.id,String(actorId),m.current_round+1]);return {id:m.id};
  }
  const subject=m.roster.find(x=>x.id===Number(subjectId));requireThat(subject,'Teilnehmer fehlt.');
  requireThat(privileged||(String(m.helper_id)===String(actorId)&&(!m.session_id||!m.roster.some(x=>x.person_id&&x.person_id===a.person_id)))||(m.session_id&&subject.person_id&&subject.person_id===a.person_id)||(m.session_id&&subject.guest_name&&String(m.coordinator_id)===String(actorId)),'Nur eigene Werte oder zugewiesene Spiele erfassen.');
@@ -186,7 +190,7 @@ export async function metricAction(actorId,id,subjectId,metric,kind,key){return 
  requireThat(Object.hasOwn(METRICS,metric),'Unbekannte Metrik.');
  if(metric==='empty_round')requireThat(!(await c.query("SELECT id FROM metric_events WHERE match_id=$1 AND subject_id=$2 AND metric='empty_round' AND undone_by IS NULL",[m.id,subject.id])).rowCount,'Leer bereits gemeldet. Zuerst eigene Eingabe zurücknehmen.');
  const amount=kind==='zero'?0:metric==='empty_round'?m.current_round:1;
- await c.query('INSERT INTO metric_events(match_id,subject_id,metric,amount,actor_id) VALUES($1,$2,$3,$4,$5)',[m.id,subject.id,metric,amount,String(actorId)]);
+ await c.query('INSERT INTO metric_events(match_id,subject_id,metric,amount,actor_id,round_no) VALUES($1,$2,$3,$4,$5,$6)',[m.id,subject.id,metric,amount,String(actorId),m.current_round]);
  return {id:m.id,audit:{subjectId:subject.id,metric,amount}};
 });}
 export async function metricValues(id,c=db){return (await c.query(`SELECT subject_id,metric,sum(amount)::float AS total,count(*)::int AS entries FROM metric_events WHERE match_id=$1 AND undone_by IS NULL AND metric<>'round' GROUP BY subject_id,metric`,[id])).rows;}

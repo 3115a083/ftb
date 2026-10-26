@@ -1,0 +1,91 @@
+name: ftb-multi-test
+x-app: &app
+  image: ftb:multi-test
+  build: .
+  restart: unless-stopped
+  networks: [frontend, backend]
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  depends_on:
+    db:
+      condition: service_healthy
+  healthcheck:
+    test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 20s
+    timeout: 5s
+    retries: 5
+    start_period: 60s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+services:
+  turnier:
+    <<: *app
+    ports: ["${TEST_BIND_IP:-127.0.0.1}:${TOURNAMENT_PORT:-3080}:3000"]
+    environment:
+      DATABASE_URL: postgresql://ftb_tournament:${TOURNAMENT_SECRET:?Set TOURNAMENT_SECRET}@db:5432/ftb_tournament
+      BOT_GATEWAY_URL: http://gateway:3000
+      INSTANCE_ID: turnier
+      INSTANCE_SECRET: ${TOURNAMENT_SECRET}
+      INSTANCE_MODE: classic
+      TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS:?Set TELEGRAM_ADMIN_IDS}
+      SITE_URL: ${TOURNAMENT_URL:-http://localhost:3080}
+      ALLOW_HTTP_TEST: ${ALLOW_HTTP_TEST:-1}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      PG_POOL_MAX: 4
+  turbo:
+    <<: *app
+    ports: ["${TEST_BIND_IP:-127.0.0.1}:${TURBO_PORT:-3081}:3000"]
+    environment:
+      DATABASE_URL: postgresql://ftb_turbo:${TURBO_SECRET:?Set TURBO_SECRET}@db:5432/ftb_turbo
+      BOT_GATEWAY_URL: http://gateway:3000
+      INSTANCE_ID: turbo
+      INSTANCE_SECRET: ${TURBO_SECRET}
+      INSTANCE_MODE: turbo
+      TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS}
+      SITE_URL: ${TURBO_URL:-http://localhost:3081}
+      ALLOW_HTTP_TEST: ${ALLOW_HTTP_TEST:-1}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      PG_POOL_MAX: 4
+  gateway:
+    <<: *app
+    command: [node, src/gateway.js]
+    environment:
+      DATABASE_URL: postgresql://ftb_gateway:${GATEWAY_DB_PASSWORD:?Set GATEWAY_DB_PASSWORD}@db:5432/ftb_gateway
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN}
+      GATEWAY_INSTANCES: >-
+        [{"id":"turnier","name":"Tagesturnier","url":"http://turnier:3000","secret":"${TOURNAMENT_SECRET}"},{"id":"turbo","name":"Turbo-Jahresrunde","url":"http://turbo:3000","secret":"${TURBO_SECRET}"}]
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    command: [postgres, -c, shared_buffers=64MB, -c, max_connections=40]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      TOURNAMENT_SECRET: ${TOURNAMENT_SECRET}
+      TURBO_SECRET: ${TURBO_SECRET}
+      GATEWAY_DB_PASSWORD: ${GATEWAY_DB_PASSWORD}
+    volumes:
+      - ftb-multi-db:/var/lib/postgresql/data
+      - ./docker/init-databases.sh:/docker-entrypoint-initdb.d/10-ftb.sh:ro
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U postgres]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  frontend:
+  backend:
+    internal: true
+volumes:
+  ftb-multi-db:

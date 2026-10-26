@@ -140,11 +140,11 @@ export async function statisticsPdf(stats) {
   const remaining=d.page.width-72-base.reduce((n,x)=>n+x.width,0);
   const columns=[...base,...keys.map(k=>({label:METRICS[k].label,width:remaining/Math.max(1,keys.length)}))];
   let page=0;
-  function header(){page++;d.font(face).fillColor('#122d26').fontSize(20).text(stats.session.name,36,32,{width:730});
-   d.fontSize(9).fillColor('#475569').text(`Turbo-Statistik | Nur freigegebene Spiele | Mindestspielzahl: ${stats.session.min_games}`,36,64);
-   d.text('Leere Werte: nicht erfasst. Runden bis leer: Durchschnitt erfasster Abschlüsse.',36,80);
-   let x=36;for(const col of columns){d.rect(x,106,col.width,42).fill('#e6efe9');d.fillColor('#173e32').fontSize(9).text(col.label,x+5,113,{width:col.width-10,height:32});x+=col.width;}
-   d.fontSize(8).fillColor('#64748b').text(`Seite ${page}`,36,d.page.height-28,{lineBreak:false});d.y=148;
+  function header(){page++;d.font(face).fillColor('#122d26').fontSize(16).text(stats.session.name,36,32,{width:730,height:44,ellipsis:true});
+   d.fontSize(9).fillColor('#475569').text(`Turbo-Statistik | Nur freigegebene Spiele | Mindestspielzahl: ${stats.session.min_games}`,36,80);
+   d.text('Leere Werte: nicht erfasst. Runden bis leer: Durchschnitt erfasster Abschlüsse.',36,96);
+   let x=36;for(const col of columns){d.rect(x,120,col.width,42).fill('#e6efe9');d.fillColor('#173e32').fontSize(9).text(col.label,x+5,127,{width:col.width-10,height:32});x+=col.width;}
+   d.fontSize(8).fillColor('#64748b').text(`Seite ${page}`,36,d.page.height-28,{lineBreak:false});d.y=162;
   }
   header();
   for(const [index,row] of [...stats.rows,stats.guests].entries()){

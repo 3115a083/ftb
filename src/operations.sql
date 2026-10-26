@@ -59,3 +59,37 @@ CREATE INDEX IF NOT EXISTS ops_status ON match_ops(status);
 CREATE INDEX IF NOT EXISTS metrics_match ON metric_events(match_id);
 CREATE INDEX IF NOT EXISTS roster_person ON match_roster(person_id);
 CREATE INDEX IF NOT EXISTS audit_time ON audit_log(created_at);
+
+ALTER TABLE event_control ADD COLUMN IF NOT EXISTS mode text NOT NULL DEFAULT 'classic' CHECK(mode IN ('classic','turbo'));
+ALTER TABLE event_control ADD COLUMN IF NOT EXISTS timezone text NOT NULL DEFAULT 'Europe/Berlin';
+ALTER TABLE event_control ADD COLUMN IF NOT EXISTS site_password_hash text;
+ALTER TABLE event_control ADD COLUMN IF NOT EXISTS site_methods jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE event_control ADD COLUMN IF NOT EXISTS site_epoch int NOT NULL DEFAULT 1;
+ALTER TABLE event_control ADD COLUMN IF NOT EXISTS site_version int NOT NULL DEFAULT 1;
+ALTER TABLE match_ops ADD COLUMN IF NOT EXISTS played_on date;
+UPDATE match_ops SET played_on=coalesce(started_at,ended_at,now()) AT TIME ZONE 'Europe/Berlin' WHERE played_on IS NULL;
+ALTER TABLE match_ops ALTER COLUMN played_on SET DEFAULT CURRENT_DATE;
+ALTER TABLE match_ops ALTER COLUMN played_on SET NOT NULL;
+ALTER TABLE event_control ADD COLUMN IF NOT EXISTS turbo_min_games int NOT NULL DEFAULT 3 CHECK(turbo_min_games BETWEEN 1 AND 1000);
+CREATE INDEX IF NOT EXISTS ops_day ON match_ops(played_on);
+CREATE TABLE IF NOT EXISTS site_accounts (
+ id serial PRIMARY KEY, username varchar(80) UNIQUE NOT NULL, password_hash text,
+ telegram_id bigint UNIQUE, active boolean NOT NULL DEFAULT true, version int NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS site_sessions (
+ token_hash char(64) PRIMARY KEY, account_id int REFERENCES site_accounts(id) ON DELETE CASCADE,
+ account_version int, epoch int NOT NULL, expires_at timestamptz NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS site_session_expiry ON site_sessions(expires_at);
+CREATE TABLE IF NOT EXISTS site_challenges (
+ token_hash char(64) PRIMARY KEY, binding_hash char(64) NOT NULL, telegram_id bigint,
+ account_id int REFERENCES site_accounts(id) ON DELETE CASCADE,
+ account_version int, remember boolean NOT NULL DEFAULT false,
+ approved boolean NOT NULL DEFAULT false, expires_at timestamptz NOT NULL,
+ epoch int NOT NULL
+);
+
+ALTER TABLE event_control ADD COLUMN IF NOT EXISTS mode_initialized boolean NOT NULL DEFAULT false;
+
+ALTER TABLE metric_events ADD COLUMN IF NOT EXISTS round_no int;

@@ -40,7 +40,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Check JavaScript syntax
         run: |
-          for file in src/*.js; do
+          for file in src/*.js public/*.js; do
             node --check "$file"
           done
       - name: Test workflows, authorization, statistics and PostgreSQL concurrency
@@ -66,3 +66,46 @@ jobs:
           retention-days: 7
       - name: Build Docker image
         run: docker build -t ftb-ci:${{ github.sha }} .
+
+      - name: Validate and start standalone Compose
+        env:
+          DB_PASSWORD: ci-test-only-123456789
+          TELEGRAM_BOT_TOKEN: ''
+          TELEGRAM_ADMIN_IDS: '1'
+        run: |
+          docker compose -f compose.dockge-test.yaml config --quiet
+          docker tag ftb-ci:${{ github.sha }} ftb:local-test
+          docker compose -f compose.dockge-test.yaml up -d --no-build --wait --wait-timeout 120
+          curl --fail http://127.0.0.1:3080/healthz
+          curl --fail http://127.0.0.1:3080/ | grep -q 'Spielbetrieb'
+      - name: Stop standalone Compose
+        if: always()
+        env:
+          DB_PASSWORD: ci-test-only-123456789
+        run: docker compose -f compose.dockge-test.yaml down --volumes
+      - name: Validate multiple instances and isolated databases
+        env:
+          DB_PASSWORD: ci-admin-secret-only
+          GATEWAY_DB_PASSWORD: ci-gateway-database-secret
+          TOURNAMENT_SECRET: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          TURBO_SECRET: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          TELEGRAM_BOT_TOKEN: ci-placeholder-unused
+          TELEGRAM_ADMIN_IDS: '1'
+        run: |
+          docker compose -f compose.multi-test.yaml config --quiet
+          docker tag ftb-ci:${{ github.sha }} ftb:multi-test
+          docker compose -f compose.multi-test.yaml -f docker/ci-multi.yaml up -d --no-build --wait --wait-timeout 180 db turnier turbo
+          curl --fail http://127.0.0.1:3080/ | grep -q 'Teamturnier'
+          curl --fail http://127.0.0.1:3081/ | grep -q 'Turbo'
+          docker compose -f compose.multi-test.yaml exec -T db psql -U postgres -d ftb_tournament -c "SELECT title FROM settings"
+          docker compose -f compose.multi-test.yaml exec -T db psql -U postgres -d ftb_turbo -c "SELECT mode FROM event_control"
+      - name: Stop multiple instances
+        if: always()
+        env:
+          DB_PASSWORD: ci-admin-secret-only
+          GATEWAY_DB_PASSWORD: ci-gateway-database-secret
+          TOURNAMENT_SECRET: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          TURBO_SECRET: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          TELEGRAM_BOT_TOKEN: ci-placeholder-unused
+          TELEGRAM_ADMIN_IDS: '1'
+        run: docker compose -f compose.multi-test.yaml -f docker/ci-multi.yaml down --volumes
