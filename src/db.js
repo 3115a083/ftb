@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
+import { ensureCatalog } from './catalog.js';
 const { Pool } = pg;
 // Calendar dates must not shift when the host timezone changes.
 pg.types.setTypeParser(1082,value=>value);
@@ -74,11 +75,12 @@ export async function migrate() {
     CREATE TABLE IF NOT EXISTS audit_log(id bigserial PRIMARY KEY,telegram_user_id bigint NOT NULL,action text NOT NULL,details jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now());
   `);
   await db.query(await readFile(new URL('./operations.sql', import.meta.url), 'utf8'));
+  const catalogClient=await db.connect();try{await catalogClient.query('BEGIN');await catalogClient.query('SELECT id FROM event_control WHERE id=1 FOR UPDATE');await ensureCatalog(catalogClient);await catalogClient.query('COMMIT');}catch(e){await catalogClient.query('ROLLBACK');throw e;}finally{catalogClient.release();}
   const initialMode=process.env.INSTANCE_MODE||'classic';
   if(!['classic','turbo'].includes(initialMode))throw Error('INSTANCE_MODE muss classic oder turbo sein.');
   await db.query('UPDATE event_control SET mode=$1,mode_initialized=true WHERE id=1 AND NOT mode_initialized',[initialMode]);
   for (const id of (process.env.TELEGRAM_ADMIN_IDS || '').split(',').map(x=>x.trim()).filter(x=>/^\d+$/.test(x))) {
-    await db.query("INSERT INTO staff(telegram_id,display_name,role) VALUES($1,$2,'admin') ON CONFLICT DO NOTHING", [id, 'Administrator '+id]);
+    await db.query("INSERT INTO staff(telegram_id,display_name,role) VALUES($1,$2,'admin') ON CONFLICT DO NOTHING", [id, 'Administration']);
   }
 }
 export async function audit(userId,action,details={}){await db.query('INSERT INTO audit_log(telegram_user_id,action,details) VALUES($1,$2,$3)',[userId,action,details])}

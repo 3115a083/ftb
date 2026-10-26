@@ -1,3 +1,4 @@
+import { telegramName } from './groups.js';
 import { randomBytes, scrypt as derive, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { db } from './db.js';
@@ -47,7 +48,7 @@ export async function requestAdmission(user,password) {
   if(valid&&current.password_epoch===permit.epoch){
    const existing=(await c.query('SELECT role FROM staff WHERE telegram_id=$1',[id])).rows[0];
    if(existing&&existing.role!=='revoked')return true;
-   await c.query("INSERT INTO join_requests(telegram_id,display_name,password_epoch) VALUES($1,$2,$3) ON CONFLICT(telegram_id) DO UPDATE SET display_name=EXCLUDED.display_name,password_epoch=EXCLUDED.password_epoch,status='pending',created_at=now()",[id,cleanName(user.first_name||user.username||'Helfer'),permit.epoch]);
+   await c.query("INSERT INTO join_requests(telegram_id,display_name,password_epoch) VALUES($1,$2,$3) ON CONFLICT(telegram_id) DO UPDATE SET display_name=EXCLUDED.display_name,password_epoch=EXCLUDED.password_epoch,status='pending',created_at=now()",[id,cleanName(telegramName(user)||'Helfer'),permit.epoch]);
    return true;
   }
   const l=(await c.query('SELECT count FROM login_limits WHERE key=$1',[id])).rows[0];
@@ -61,7 +62,7 @@ export async function approveAdmission(actor,target,personId,requestId) {
  if(personId)requireThat((await c.query('SELECT id FROM people WHERE id=$1 AND active',[personId])).rowCount,'Person fehlt.');
  const existing=(await c.query('SELECT role FROM staff WHERE telegram_id=$1',[String(target)])).rows[0];
  requireThat(!existing||existing.role==='revoked','Person besitzt bereits Rechte.');
- await c.query("INSERT INTO staff(telegram_id,display_name,role,person_id) VALUES($1,$2,'helper',$3) ON CONFLICT(telegram_id) DO UPDATE SET display_name=EXCLUDED.display_name,role='helper',person_id=EXCLUDED.person_id",[String(target),r.display_name,personId||null]);
+ await c.query("INSERT INTO staff(telegram_id,display_name,role,person_id,telegram_known) VALUES($1,$2,'helper',$3,true) ON CONFLICT(telegram_id) DO UPDATE SET display_name=EXCLUDED.display_name,role='helper',person_id=EXCLUDED.person_id,telegram_known=true",[String(target),r.display_name,personId||null]);
  await c.query("UPDATE join_requests SET status='approved' WHERE telegram_id=$1",[String(target)]);return {audit:{target:String(target),personId}};});
 }
 export async function changeRole(actor,target,role,requestId) {

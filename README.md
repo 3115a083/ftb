@@ -20,6 +20,9 @@ FTB ist eine selbst gehostete Turnierplattform mit öffentlicher oder passwortge
 - Administration, Turnierleitung und Helfer mit getrennten Rechten. Helfer können Spieler sein, dürfen im Teamturnier aber kein eigenes Team betreuen.
 - Gemeinsames Helferpasswort plus persönliche Freigabe. Spielfelder bleiben bis zur Ergebnisfreigabe belegt.
 - Ergebniskorrektur mit Begründung und Reparaturdialog für abhängige K.-o.-Begegnungen.
+- Sammelimport von Personen und Teams mit optionalen Spielernamen, Namensadressen und Begegnungsgästen.
+- Telegram-Gruppen mit freigegebenen Statistiken und optionalen Spiel-Updates.
+- Kompakte Downloads, ausklappbare Hilfen und Statistikdiagramme mit Zeitraumfiltern.
 - Optionaler Website-Zugang per Seitenpasswort, Benutzerkonto und Telegram, frei kombinierbar. Browser-Sitzungen lassen sich merken und widerrufen.
 - Ein gemeinsamer Bot kann mehrere Instanzen bedienen. Datenbanken, Rollen und Zugänge bleiben je Instanz getrennt.
 

@@ -11,7 +11,7 @@ let db,stop;
 before(async()=>{({db,stop}=await database());});
 after(async()=>{await stop();});
 beforeEach(async()=>{
- await db.query('TRUNCATE bot_ui_messages,site_sessions,site_accounts,site_challenges,teams,people,staff,fields,turbo_sessions,match_ops,match_roster,metric_events,join_requests,login_limits,operation_requests,audit_log,event_control RESTART IDENTITY CASCADE');
+ await db.query('TRUNCATE group_invites,telegram_groups,bot_ui_messages,site_sessions,site_accounts,site_challenges,teams,people,staff,fields,turbo_sessions,match_ops,match_roster,metric_events,join_requests,login_limits,operation_requests,audit_log,event_control RESTART IDENTITY CASCADE');
  await db.query('INSERT INTO event_control(id) VALUES(1)');
  await db.query("INSERT INTO staff(telegram_id,display_name,role) VALUES(1,'Admin','admin'),(2,'Leitung','lead'),(3,'Helfer','helper'),(4,'Helfer zwei','helper')");
  await db.query('UPDATE settings SET winner_team_id=NULL,tournament_finished=false');
@@ -200,8 +200,9 @@ test('Telegram wizard creates a round-local guest using names and buttons',async
  const controller=createBotController(bot);const q=data=>({id:key(),data,from:{id:2},message:{chat:{id:2,type:'private'}}});
  const click=async label=>{const b=messages.at(-1).options.reply_markup.inline_keyboard.flat().find(x=>x.text===label);assert.ok(b,`Button ${label}`);await controller.onCallback(q(b.callback_data));};
  await controller.onCallback(q('turbo:'+f.session.id+':manual'));await click('Alice');await click('Auswahl übernehmen');
+ await click('Bob');await click('Auswahl übernehmen');
  await controller.onMessage({message_id:44,from:{id:2},chat:{id:2,type:'private'},text:'Gast nur jetzt'});
- await click('Bob');await click('Auswahl übernehmen');await click('Überspringen');await click('Überspringen');await click('Helfer');
+ await click('Überspringen');await click('Überspringen');await click('Helfer');
  assert.match(messages.at(-1).text,/Alice/);assert.match(messages.at(-1).text,/Bob/);await click('Speichern');
  const newest=(await db.query('SELECT id FROM match_ops ORDER BY id DESC LIMIT 1')).rows[0];const m=await getMatch(newest.id);assert.equal(m.status,'planned');assert.equal(m.roster.filter(r=>r.guest_name).length,1);assert.equal(m.roster.find(r=>r.guest_name).guest_name,'Gast nur jetzt');
 });
@@ -219,7 +220,7 @@ test('year and day filters count only approved appearances, guests and exports i
  const f=await fixture({guest:true});await db.query("UPDATE match_ops SET played_on='2025-12-31' WHERE id=$1",[f.game.id]);
  await matchAction(1,f.game.id,'report',{side:'A'},key());await matchAction(1,f.game.id,'approve',{},key());
  let s=await turboStats(null,db,{year:'2026'});assert.equal(s.rows.length,0);assert.equal(s.guests.played,0);
- s=await turboStats(null,db,{year:'2025',day:'2025-12-31'});assert.equal(s.rows.length,2);assert.equal(s.guests.played,1);assert.equal(s.rows[0].qualified,false);assert.match(statisticsCsv(s),/Spieltag 2025-12-31/);
+ s=await turboStats(null,db,{year:'2025',day:'2025-12-31'});assert.equal(s.rows.length,2);assert.equal(s.guests.played,1);assert.equal(s.rows[0].qualified,false);assert.match(statisticsCsv(s),/Spieltag 31.12.25/);
  await assert.rejects(()=>turboStats(null,db,{year:'2026',day:'2025-12-31'}),/passt nicht/);
 });
 test('public live data hides pending winners and exposes preliminary metrics without staff identities',async()=>{
@@ -363,4 +364,71 @@ test('bot navigation cleanup persists across restarts and only removes a menu af
  const before=deleted.length;failSend=true;await controller.onCallback(q('help'));assert.equal(deleted.length,before);assert.equal(Number((await db.query('SELECT message_id FROM bot_ui_messages WHERE chat_id=1')).rows[0].message_id),104);
  failSend=false;failDelete=true;await controller.onCallback(q('help'));assert.equal(Number((await db.query('SELECT message_id FROM bot_ui_messages WHERE chat_id=1')).rows[0].message_id),105);failDelete=false;
  await controller.onCallback(q('home',2));assert.ok(!deleted.some(x=>x.chat===2));
+});
+
+test('bulk imports validate atomically and publish unique named paths with permanent aliases',async()=>{
+ const {parseImport}=await import('../src/imports.js');const {entityUrl}=await import('../src/catalog.js');
+ assert.equal(parseImport('Nord: Max, Anna\nSüd\nWest: Max','teams').length,3);
+ await assert.rejects(()=>setup(3,'bulk_import',{kind:'teams',text:'Nicht erlaubt'},key()),/Turnierleitung/);
+ await assert.rejects(()=>setup(1,'bulk_import',{kind:'teams',text:'Gültig\n'+('X'.repeat(101))},key()),/gültigen Namen/);assert.equal(Number((await db.query('SELECT count(*) FROM teams')).rows[0].count),0);
+ const first=await setup(1,'bulk_import',{kind:'teams',text:'Nord: Max, Anna\nSüd\nWest: Max'},key());assert.equal(first.teams,3);assert.equal(first.people,3);
+ const again=await setup(1,'bulk_import',{kind:'teams',text:'Nord: Max, Anna'},key());assert.equal(again.people,0);assert.equal(again.teams,0);
+ await setup(1,'bulk_import',{kind:'people',text:'Max\nAnna\nMax'},key());
+ const paths=(await db.query('SELECT name,public_path FROM people ORDER BY id')).rows.map(r=>r.public_path);assert.ok(paths.includes('Nord/Max'));assert.ok(paths.includes('West/Max'));assert.ok(paths.includes('Max'));
+ const other=await setup(1,'person_add',{name:'Max'},key());assert.equal((await db.query('SELECT public_path FROM people WHERE id=$1',[other.id])).rows[0].public_path,'Max-2');
+ const team=(await db.query("SELECT id FROM teams WHERE name='Nord'")).rows[0],person=(await db.query("SELECT id FROM people WHERE public_path='Nord/Max'")).rows[0];
+ await setup(1,'team_edit',{id:team.id,field:'name',value:'Nord Neu'},key());assert.equal((await db.query('SELECT public_path FROM people WHERE id=$1',[person.id])).rows[0].public_path,'Nord-Neu/Max');
+ await loginServer(async base=>{
+  const old=await fetch(base+'/personen/Nord/Max?page=2',{redirect:'manual'});assert.equal(old.status,301);assert.equal(old.headers.get('location'),'/personen/Nord-Neu/Max?page=2');
+  assert.equal((await fetch(base+'/personen/'+person.id,{redirect:'manual'})).headers.get('location'),'/personen/Nord-Neu/Max');assert.equal((await fetch(base+'/personen/Nord-Neu/Max')).status,200);
+  const html=await fetch(base+entityUrl('team','Nord-Neu')).then(r=>r.text());assert.match(html,/href="\/personen\/Nord-Neu\/Max"/);
+ });
+ await migrate();assert.equal((await db.query('SELECT public_path FROM people WHERE id=$1',[person.id])).rows[0].public_path,'Nord-Neu/Max');
+});
+test('round wizard shuffles only selected people, then guests, and keeps expandable help in place',async()=>{
+ const f=await fixture(),excluded=await setup(1,'person_add',{name:'Nicht dabei'},key()),messages=[];
+ const controller=createBotController({sendMessage:async(chat,text,options)=>{messages.push({text,options});return{};},answerCallbackQuery:async()=>{},deleteMessage:async()=>{}}),q=data=>({id:key(),data,from:{id:2},message:{chat:{id:2,type:'private'}}});
+ const click=async label=>{const b=messages.at(-1).options.reply_markup.inline_keyboard.flat().find(x=>x.text===label);assert.ok(b,'Missing '+label);await controller.onCallback(q(b.callback_data));};
+ await controller.onCallback(q('round_method:'+f.session.id));await click('🎲 Ausgewählte Personen mischen');const draft=controller.drafts.get('2');assert.equal(draft.fields[0].key,'players');
+ await click('Alice');assert.ok(messages.at(-1).options.reply_markup.inline_keyboard.flat().some(b=>b.text==='✅ Alice'));await click('Bob');await click('Auswahl übernehmen');assert.equal(draft.fields[draft.step].key,'guestA');
+ await click('? Erklärung');assert.match(messages.at(-1).text,/keine dauerhaften Profile/);assert.equal(draft.fields[draft.step].key,'guestA');await click('? Erklärung schließen');
+ await controller.onMessage({message_id:999,from:{id:2},chat:{id:2,type:'private'},text:'Besuch'});await click('Überspringen');
+ await controller.onMessage({message_id:1000,from:{id:2},chat:{id:2,type:'private'},text:'27.10.26'});await click('Turnierleitung / neutrale Betreuung');assert.match(messages.at(-1).text,/Seite A:/);assert.match(messages.at(-1).text,/Seite B:/);assert.match(messages.at(-1).text,/27.10.26/);await click('Speichern');
+ const game=(await db.query('SELECT id,played_on FROM match_ops ORDER BY id DESC LIMIT 1')).rows[0],roster=(await getMatch(game.id)).roster;assert.equal((await import('../src/dates.js')).dateIso(game.played_on),'2026-10-27');assert.ok(!roster.some(r=>r.person_id===excluded.id));assert.equal(roster.filter(r=>r.person_id).length,2);assert.equal(roster.filter(r=>r.guest_name==='Besuch').length,1);
+});
+test('team encounter guests stay round-local and approval still advances the correct team',async()=>{
+ const a=await setup(1,'team_add',{name:'Nord'},key()),b=await setup(1,'team_add',{name:'Süd'},key());await db.query('INSERT INTO games(home_team_id,away_team_id) VALUES($1,$2)',[a.id,b.id]);await syncGames();const id=(await db.query('SELECT id FROM match_ops')).rows[0].id;
+ let m=await getMatch(id);await setup(1,'classic_guests',{id,version:m.version,guestA:['Besuch'],guestB:['Gast B']},key());
+ await assert.rejects(()=>setup(1,'classic_guests',{id,version:m.version,guestA:[],guestB:[]},key()),/inzwischen/);m=await getMatch(id);assert.equal(m.roster.filter(r=>r.guest_name).length,2);assert.equal(Number((await db.query('SELECT count(*) FROM people')).rows[0].count),0);
+ const field=await setup(1,'field_add',{name:'Platz'},key());await matchAction(1,id,'assign',{fieldId:field.id,helperId:'3'},key());await matchAction(3,id,'start',{},key());await assert.rejects(()=>setup(1,'classic_guests',{id,guestA:[],guestB:[]},key()),/vor Spielbeginn/);
+ await matchAction(3,id,'report',{side:'A'},key());await matchAction(2,id,'approve',{},key());assert.equal((await db.query('SELECT winner_team_id FROM games')).rows[0].winner_team_id,a.id);
+});
+test('group binding is explicit, limited to leads and requires opt-in before approved updates',async()=>{
+ const {inviteGroup,groupMessage,publishGroups}=await import('../src/groups.js');const sent=[],bot={sendMessage:async(chat,text)=>{sent.push({chat:String(chat),text});return{};},deleteMessage:async()=>{}};
+ const m=(text,id=1)=>({message_id:++seq,chat:{id:-1001,type:'supergroup',title:'Verein'},from:{id},text});
+ await groupMessage(bot,m('/statistik',9));assert.equal(sent.length,0);await assert.rejects(()=>inviteGroup(3,key()),/Turnierleitung/);
+ const token=await inviteGroup(1,key());await assert.rejects(()=>groupMessage(bot,m('/ftb_verbinden local '+token,3)),/Turnierleitung/);await assert.rejects(()=>groupMessage(bot,m('/ftb_verbinden local '+token,2)),/ungültig/);
+ assert.deepEqual(await groupMessage(bot,m('/ftb_verbinden local '+token)),{groupBound:true});assert.equal((await db.query('SELECT updates FROM telegram_groups')).rows[0].updates,false);
+ sent.length=0;await publishGroups(bot,'Nicht aktiviert');assert.equal(sent.length,0);await assert.rejects(()=>groupMessage(bot,m('/updates an',9)),/Berechtigung/);await groupMessage(bot,m('/updates an',2));
+ const f=await fixture();await matchAction(2,f.game.id,'report',{side:'A'},key());await groupMessage(bot,m('/statistik',9));assert.match(sent.at(-1).text,/Noch keine freigegebenen/);
+ await matchAction(2,f.game.id,'approve',{},key());await publishGroups(bot,'✅ Ergebnis freigegeben',{statistics:true});assert.match(sent.at(-1).text,/Alice/);assert.ok(!sent.at(-1).text.includes('telegram_id'));
+ await groupMessage(bot,m('/updates aus',1));sent.length=0;await publishGroups(bot,'Kein Update');assert.equal(sent.length,0);assert.deepEqual(await groupMessage(bot,m('/ftb_trennen',1)),{groupUnbound:true});assert.equal(Number((await db.query('SELECT count(*) FROM telegram_groups')).rows[0].count),0);
+ const expired=await inviteGroup(1,key());await db.query("UPDATE group_invites SET expires_at=now()-interval '1 second'");await assert.rejects(()=>groupMessage(bot,m('/ftb_verbinden local '+expired)),/abgelaufen/);
+});
+test('group controller rejects administration and foreign bot mentions while Telegram names replace numeric labels',async()=>{
+ const sent=[],controller=createBotController({sendMessage:async(chat,text,options)=>{sent.push({text,options});return{};},answerCallbackQuery:async()=>{},deleteMessage:async()=>{}},{username:'FtbTestBot'});
+ await controller.onMessage({message_id:1,chat:{id:-22,type:'group'},from:{id:1},text:'/seite'});await controller.onMessage({message_id:2,chat:{id:-22,type:'group'},from:{id:1},text:'/ftb_verbinden@OtherBot invalid'});assert.equal(sent.length,0);
+ const f=await fixture();await controller.onMessage({message_id:3,chat:{id:3,type:'private'},from:{id:3,username:'MaxVerein',first_name:'Max'},text:'/start'});assert.equal((await actor(3)).display_name,'@MaxVerein');assert.match(sent.at(-1).text,/@MaxVerein/);assert.equal((await getMatch(f.game.id)).roster.find(r=>r.person_id===f.alice.id).name,'@MaxVerein');
+ const privateCallbacks=()=>({id:key(),data:'manage',from:{id:1,first_name:'Max'},message:{chat:{id:1,type:'private'}}});await controller.onCallback(privateCallbacks());const buttons=sent.at(-1).options.reply_markup.inline_keyboard.flat().map(b=>b.text);assert.ok(buttons.includes('Gruppen & Updates'));
+});
+test('gateway routes group commands only after an acknowledged instance binding',async()=>{
+ const {createGateway}=await import('../src/gateway.js');let accepted=false;const forwarded=[],sent=[],instances=[{id:'one',name:'Eins',url:'http://one:3000',secret:'a'.repeat(48)},{id:'two',name:'Zwei',url:'http://two:3000',secret:'b'.repeat(48)}];
+ const gateway=await createGateway({pool:db,instances,bot:{sendMessage:async(chat,text)=>{sent.push(text);},answerCallbackQuery:async()=>{}},request:async(url,options)=>{const payload=JSON.parse(options.body).payload;forwarded.push({url,payload});return {ok:true,json:async()=>({groupBound:accepted&&payload.text.startsWith('/ftb_verbinden'),groupUnbound:payload.text==='/ftb_trennen'})};}});
+ const m=text=>({message_id:++seq,chat:{id:-909,type:'group'},from:{id:42},text});await gateway.onMessage(m('/verwaltung'));assert.equal(forwarded.length,0);
+ await gateway.onMessage(m('/ftb_verbinden one '+'a'.repeat(36)));assert.equal((await db.query('SELECT * FROM gateway_groups WHERE chat_id=-909')).rowCount,0);accepted=true;await gateway.onMessage(m('/ftb_verbinden one '+'a'.repeat(36)));assert.equal((await db.query('SELECT instance_id FROM gateway_groups WHERE chat_id=-909')).rows[0].instance_id,'one');
+ await gateway.onMessage(m('/statistik'));assert.match(forwarded.at(-1).url,/one/);await gateway.onMessage(m('/ftb_verbinden two '+'b'.repeat(36)));assert.match(sent.at(-1),/Zuerst/);await gateway.onMessage(m('/ftb_trennen'));assert.equal((await db.query('SELECT * FROM gateway_groups WHERE chat_id=-909')).rowCount,0);
+});
+test('date inputs are calendar-validated and chart data excludes pending and unqualified appearances',async()=>{
+ const {parseDate,displayDate}=await import('../src/dates.js'),{statisticsCharts}=await import('../src/charts.js');assert.equal(parseDate('27.10.26'),'2026-10-27');assert.equal(displayDate('2026-10-27'),'27.10.26');assert.throws(()=>parseDate('31.02.26'),/Datum/);
+ assert.equal(statisticsCharts({rows:[{name:'Ungewertet',qualified:false,played:1,win_rate:1}]}),'');const chart=statisticsCharts({rows:[{name:'Max <Gast>',qualified:true,played:3,win_rate:2/3}]});assert.match(chart,/66.7/);assert.match(chart,/Max &lt;Gast&gt;/);assert.ok(!chart.includes('Max <Gast>'));
 });

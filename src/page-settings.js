@@ -1,3 +1,4 @@
+import { ensureCatalog } from './catalog.js';
 import { db } from './db.js';
 import { transact } from './transactions.js';
 import { LEADS, cleanName, requireThat } from './rules.js';
@@ -36,7 +37,7 @@ export async function savePage(actorId,kind,data,key){return transact(actorId,'p
   if(kind==='sponsor_add')await c.query('INSERT INTO sponsors(name,url,logo) VALUES($1,$2,$3)',[name,url,data.logo||null]);
   else await c.query('UPDATE sponsors SET name=$1,url=$2,logo=$3 WHERE id=$4',[name,url,data.logo||null,data.id]);
  }else if(kind==='sponsor_delete')await c.query('DELETE FROM sponsors WHERE id=$1',[data.id]);
- else if(kind==='demo_seed')await seedDemo(c);
+ else if(kind==='demo_seed'){await seedDemo(c);await ensureCatalog(c);}
  else if(kind==='demo_clear')await clearDemo(c);
  else if(kind==='onboarding'){
   const classic=(await c.query('SELECT mode FROM event_control WHERE id=1')).rows[0].mode==='classic';

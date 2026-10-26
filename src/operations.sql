@@ -102,3 +102,14 @@ ALTER TABLE site_challenges ADD COLUMN IF NOT EXISTS next_path text NOT NULL DEF
 CREATE TABLE IF NOT EXISTS bot_ui_messages (
  chat_id bigint PRIMARY KEY, message_id bigint NOT NULL
 );
+
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS public_path text;
+ALTER TABLE people ADD COLUMN IF NOT EXISTS public_path text;
+CREATE TABLE IF NOT EXISTS team_urls(path text PRIMARY KEY,team_id int NOT NULL REFERENCES teams(id) ON DELETE CASCADE);
+CREATE UNIQUE INDEX IF NOT EXISTS team_url_case ON team_urls(lower(path));
+CREATE TABLE IF NOT EXISTS person_urls(path text PRIMARY KEY,person_id int NOT NULL REFERENCES people(id) ON DELETE CASCADE);
+CREATE UNIQUE INDEX IF NOT EXISTS person_url_case ON person_urls(lower(path));
+CREATE TABLE IF NOT EXISTS group_invites(token_hash text PRIMARY KEY,created_by bigint NOT NULL,expires_at timestamptz NOT NULL);
+CREATE TABLE IF NOT EXISTS telegram_groups(chat_id bigint PRIMARY KEY,title text NOT NULL,updates boolean NOT NULL DEFAULT false,enabled_by bigint NOT NULL);
+
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS telegram_known boolean NOT NULL DEFAULT false;

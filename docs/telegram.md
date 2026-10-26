@@ -76,3 +76,33 @@ Vor echtem Einsatz zusätzlich in einem eigenen Teststack prüfen: Telegram-Nach
 ## Chat aufräumen
 
 Pro Instanz und privatem Chat ersetzt eine neue Bediennachricht die vorherige. FTB speichert deren Nachrichten-ID, damit das Aufräumen nach einem Neustart weitergeht. Eine alte Bediennachricht wird erst entfernt, nachdem die neue erfolgreich zugestellt und gespeichert wurde. Verarbeitete Befehle, Texte und Logo-Eingaben werden ebenfalls entfernt. PDF- und CSV-Downloads bleiben erhalten. Löschfehler verhindern keine Bedienung. Telegram kann insbesondere das Löschen älterer Nachrichten begrenzen; Nachrichten aus der Zeit vor dieser Funktion kann der Bot nicht rückwirkend aus dem Chatverlauf auslesen.
+
+## Teilnehmer gesammelt anlegen
+
+Unter **Zugänge & Einstellungen → Teilnehmer & Teams** stehen Sammelimporte bereit. Eine Person pro Zeile, oder eine Zeile pro Team mit optionalen Spielernamen:
+
+```text
+Team Nord: Max, Anna
+Team Süd
+Team West: Max, Robin
+```
+
+Die Vorschau zeigt die Anzahl und die ersten Namen. Die gesamte Liste wird vor dem Speichern geprüft und atomar übernommen. Vorhandene Namen im selben Team werden übersprungen. Pro Nachricht sind bis zu 200 Zeilen und 500 zugehörige Spielernamen möglich, innerhalb des Telegram-Nachrichtenlimits. Teams dürfen ohne Spielernamen angelegt werden. Wiederholte Namen in unterschiedlichen Teams sind erlaubt.
+
+## Neue Spiele und Gäste
+
+Bei **Spiel zusammenstellen** zuerst **Mischen** oder **Seiten selbst festlegen** wählen. Beim Mischen werden ausschließlich die markierten Personen verteilt. Bei manueller Besetzung zuerst beide Personenseiten festlegen. Danach kommen Gäste, Spieltag und Rundenzähler. Die Vorschau zeigt beide Seiten vor dem Speichern. ✅ kennzeichnet ausgewählte Personen. **? Erklärung** klappt Hilfe im aktuellen Dialog auf und wieder zu, ohne Werte zu verändern. Spieltage werden als DD.MM.YY eingegeben; ISO-Daten bleiben kompatibel.
+
+In Teamturnieren gibt es vor dem Spielstart die Aktion **Gäste für dieses Spiel**. Gäste bleiben auf diese Begegnung und Seite begrenzt. Sie werden nicht als dauerhafte Personen angelegt und verändern keine Teammitgliedschaften. Nach Spielbeginn ist diese Besetzung gesperrt.
+
+**Website gestalten** enthält Titel, Logo, Farben, Sponsoren und Regeln. **Zugänge & Einstellungen** enthält Rechte, Teilnehmer, Felder, Website-Zugang und Gruppen. Numerische Telegram-IDs dienen intern weiter der Zuordnung. Die Bedienung zeigt nach einer Bot-Interaktion den @Namen oder Telegram-Vor- und Nachnamen.
+
+## Gruppen und automatische Updates
+
+1. Im privaten Bot **Zugänge & Einstellungen → Gruppen & Updates → Gruppe verbinden** öffnen.
+2. Den Bot zur Gruppe hinzufügen. Den erzeugten Befehl dort selbst als Turnierleitung senden. Er enthält Instanzkennung und einen einmaligen, zehn Minuten gültigen Code.
+3. `/statistik@BOTNAME` zeigt die freigegebene Statistik. Alle Mitglieder einer verbundenen Gruppe dürfen sie abrufen.
+4. Eine Turnierleitung aktiviert mit `/updates@BOTNAME an` Spielstarts, Fortsetzungen und freigegebene Ergebnisse samt Statistik. Mit `aus` werden sie abbestellt. Standardmäßig sind automatische Updates aus.
+5. `/ftb_trennen@BOTNAME` trennt die Gruppe. Auch das ist auf die Turnierleitung begrenzt.
+
+Ersetze `BOTNAME` durch den tatsächlichen Botnamen. Die explizite @Adressierung funktioniert auch bei aktivierter Telegram-Gruppen-Privatsphäre und mehreren Bots. Für das Löschen des Verbindungscodes kann Telegram zusätzliche Gruppenrechte verlangen. Gruppen sind reine Anzeigekanäle: Administration, Helferanmeldung, Website-Anmeldung und Ergebniskorrekturen bleiben privat. Die Freigabe einer Gruppe erlaubt ihren Mitgliedern die dort veröffentlichten Statistiken auch dann, wenn die Website separat geschützt ist. Ein gemeinsamer Gateway-Bot ordnet eine Gruppe genau einer Instanz zu. Vor einem Wechsel die bestehende Verbindung trennen.

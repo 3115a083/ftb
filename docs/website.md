@@ -49,3 +49,11 @@ Seiten-, Team- und Sponsorenlogos können im Bot als PNG- oder JPEG-Datei mit h�
 Bei `ALLOW_HTTP_TEST=1` bleiben CSS und JavaScript auf derselben HTTP-Adresse erreichbar. Der Testmodus setzt weder HTTPS-Upgrades für Assets noch HSTS. Für öffentlichen HTTPS-Betrieb bleibt `ALLOW_HTTP_TEST=0` mit den HTTPS-Schutzheadern erforderlich.
 
 Turbo hat keine Finalspiele und keinen automatischen Turnierabschluss. Eine offene Sitzung kann beliebig viele frei besetzte Spiele enthalten. Nur die ausdrückliche Aktion **Sitzung beenden** schließt sie für neue Spiele. Die Jahreswertung fasst weiterhin alle freigegebenen Spiele des gewählten Zeitraums zusammen.
+
+## Namensadressen und kompakte Bedienung
+
+Personen und Teams erhalten eigene Adressen wie `/personen/Max`, `/teams/Team-Nord` oder `/personen/Team-Nord/Max`. Leerzeichen werden zu Bindestrichen. Doppelte Namen im selben Pfad erhalten Suffixe wie `Max-2`. Groß- und Kleinschreibung werden beim Reservieren berücksichtigt, damit Namen nicht nur dadurch unterschieden werden. Umbenennungen und geänderte Teamzuordnungen erzeugen neue kanonische Adressen; alte Namensadressen und Zahlenlinks leiten weiter. Bestehende Favoriten bleiben über interne IDs erhalten.
+
+Das Symbol oben rechts schaltet Automatisch, Hell und Dunkel um. Name und aktueller Zustand sind für Screenreader und als Tooltip verfügbar. Downloads liegen im Dreipunktemenü. Das Menü lässt sich mit Escape schließen. Fragezeichen öffnen Hilfetexte. Die Modus-Kennzeichnung entfällt im Turbo-Kopfbereich. Sichtbare Spieltage verwenden DD.MM.YY.
+
+Diagramme lassen sich in der Statistik ausklappen. Turbo zeigt die Siegquote gewerteter Personen, höchstens zwölf in Ranglistenreihenfolge. Bei mehreren Monaten kommt die Zahl freigegebener Spiele pro Monat hinzu, zuletzt bis zu zwölf Monate. Die gleichen Jahres-, Tages- und Sitzungsfilter gelten für Diagramme, Tabelle und Exporte. Gäste und ungewertete Personen verfälschen den Siegquotenvergleich nicht. Teamturniere zeigen Siege aus freigegebenen Gruppenspielen; die Tabelle nennt ergänzend die Spielzahlen. Fehlende Metriken werden weiterhin nicht als gemessene Null ausgegeben.

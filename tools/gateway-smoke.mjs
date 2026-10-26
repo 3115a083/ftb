@@ -21,6 +21,15 @@ try{
  await gateway.onCallback(q(originalFields));await click('Feld hinzufügen');await gateway.onMessage({from:{id:1},chat:message.chat,message_id:101,text:'Echtes RPC-Testfeld'});await click('Speichern');
  assert.equal((await pools[1].query('SELECT name FROM fields')).rows[0].name,'Echtes RPC-Testfeld');assert.equal((await pools[2].query('SELECT count(*)::int n FROM fields')).rows[0].n,0);
  await gateway.onCallback(q('select:turbo'));assert.match(messages.at(-1).text,/Jahresrunde/);await gateway.onCallback(q(originalFields));assert.match(messages.at(-1).text,/Tagesturnier/);assert.ok(messages.at(-1).options.reply_markup.inline_keyboard.flat().some(b=>b.text.includes('RPC-Testfeld')));
+ // Group binding must survive the full gateway -> app -> Telegram RPC roundtrip.
+ await gateway.onCallback(q('select:turbo'));await click('Zugänge & Einstellungen');await click('Gruppen & Updates');await click('Gruppe verbinden');
+ const bind=/\/ftb_verbinden@FtbSyntheticBot turbo [a-f0-9]{36}/.exec(messages.at(-1).text)?.[0];assert.ok(bind,'Private invite includes explicit bot mention');
+ const groupMessage=(text,id=1)=>({from:{id},chat:{id:-6001,type:'supergroup',title:'Synthetic club'},message_id:200+messages.length,text});
+ await gateway.onMessage(groupMessage(bind));assert.equal((await pools[0].query('SELECT instance_id FROM gateway_groups WHERE chat_id=-6001')).rows[0].instance_id,'turbo');assert.equal((await pools[2].query('SELECT updates FROM telegram_groups WHERE chat_id=-6001')).rows[0].updates,false);assert.equal((await pools[1].query('SELECT * FROM telegram_groups')).rowCount,0);
+ await gateway.onMessage(groupMessage('/statistik@FtbSyntheticBot',99));assert.equal(String(messages.at(-1).chat),'-6001');assert.match(messages.at(-1).text,/Jahresrangliste/);
+ await gateway.onMessage(groupMessage('/updates@FtbSyntheticBot an'));assert.equal((await pools[2].query('SELECT updates FROM telegram_groups WHERE chat_id=-6001')).rows[0].updates,true);
+ const before=messages.length;await gateway.onMessage(groupMessage('/verwaltung@FtbSyntheticBot'));assert.equal(messages.length,before);
+ await gateway.onMessage(groupMessage('/ftb_trennen@FtbSyntheticBot'));assert.equal((await pools[0].query('SELECT * FROM gateway_groups WHERE chat_id=-6001')).rowCount,0);
  const forbidden=await fetch(instances[0].url+'/internal/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'callback',payload:q('field_add')})});assert.equal(forbidden.status,403);
  console.log('OK: one gateway, two real app processes, separate PostgreSQL databases, authenticated RPC and instance-bound callbacks');
 }finally{

@@ -1,3 +1,5 @@
+import { assignPath, ensureCatalog } from './catalog.js';
+import { parseImport, importEntries } from './imports.js';
 import { db } from './db.js';
 import { transact } from './transactions.js';
 import { BUSY, LEADS, METRICS, cleanName, metricList, requireThat } from './rules.js';
@@ -7,6 +9,7 @@ const one=async(c,sql,args=[])=> (await c.query(sql,args)).rows[0];
 export async function syncGames(c=db) {
  if(c===db){const client=await db.connect();try{await client.query('BEGIN');await client.query('SELECT id FROM event_control WHERE id=1 FOR UPDATE');await syncGames(client);await client.query('COMMIT');return;}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}}
 
+ await ensureCatalog(c);
  const rows=(await c.query(`INSERT INTO match_ops(game_id,status,winning_side)
  SELECT id,CASE status WHEN 'finished' THEN 'finished' WHEN 'live' THEN 'paused' WHEN 'cancelled' THEN 'cancelled' ELSE 'planned' END,
  CASE WHEN winner_team_id=home_team_id THEN 'A' WHEN winner_team_id=away_team_id THEN 'B' ELSE NULL END
@@ -22,7 +25,7 @@ export async function getMatch(id,c=db){
  h.display_name helper_name FROM match_ops m LEFT JOIN fields f ON f.id=m.field_id LEFT JOIN turbo_sessions s ON s.id=m.session_id
  LEFT JOIN games g ON g.id=m.game_id LEFT JOIN staff h ON h.telegram_id=m.helper_id WHERE m.id=$1`,[id]);
  requireThat(m,'Spiel nicht gefunden.');
- m.roster=(await c.query(`SELECT r.*,coalesce(p.name,t.name,r.guest_name) name FROM match_roster r LEFT JOIN people p ON p.id=r.person_id LEFT JOIN teams t ON t.id=r.team_id WHERE r.match_id=$1 ORDER BY side,r.id`,[id])).rows;
+ m.roster=(await c.query(`SELECT r.*,coalesce(st.display_name,p.name,t.name,r.guest_name) name FROM match_roster r LEFT JOIN people p ON p.id=r.person_id LEFT JOIN teams t ON t.id=r.team_id LEFT JOIN staff st ON st.person_id=p.id AND st.role<>'revoked' AND st.telegram_known WHERE r.match_id=$1 ORDER BY side,r.id`,[id])).rows;
  return m;
 }
 export async function listMatches(){
@@ -31,7 +34,7 @@ export async function listMatches(){
   FROM match_ops m LEFT JOIN fields f ON f.id=m.field_id LEFT JOIN turbo_sessions s ON s.id=m.session_id
   LEFT JOIN games g ON g.id=m.game_id LEFT JOIN staff h ON h.telegram_id=m.helper_id
   ORDER BY CASE m.status WHEN 'pending' THEN 0 WHEN 'correction' THEN 1 WHEN 'live' THEN 2 WHEN 'paused' THEN 3 WHEN 'assigned' THEN 4 WHEN 'planned' THEN 5 ELSE 6 END,m.id DESC`)).rows;
- const roster=(await db.query(`SELECT r.*,coalesce(p.name,t.name,r.guest_name) name FROM match_roster r LEFT JOIN people p ON p.id=r.person_id LEFT JOIN teams t ON t.id=r.team_id ORDER BY r.side,r.id`)).rows;
+ const roster=(await db.query(`SELECT r.*,coalesce(st.display_name,p.name,t.name,r.guest_name) name FROM match_roster r LEFT JOIN people p ON p.id=r.person_id LEFT JOIN teams t ON t.id=r.team_id LEFT JOIN staff st ON st.person_id=p.id AND st.role<>'revoked' AND st.telegram_known ORDER BY r.side,r.id`)).rows;
  const byMatch=new Map();for(const row of roster){if(!byMatch.has(row.match_id))byMatch.set(row.match_id,[]);byMatch.get(row.match_id).push(row);}
  return matches.map(m=>({...m,roster:byMatch.get(m.id)||[]}));
 }
@@ -40,7 +43,7 @@ function controller(a,m){return LEADS.includes(a.role)||String(m.helper_id)===St
 function canReport(a,m){return controller(a,m)||(m.session_id&&m.roster.some(x=>x.person_id&&x.person_id===a.person_id));}
 async function checkHelper(c,helper,m){
  const h=await actor(helper,c);requireThat(h,'Helfer ist nicht freigegeben.');
- if(!m.session_id&&h.person_id){const p=await one(c,'SELECT team_id FROM people WHERE id=$1',[h.person_id]);requireThat(!m.roster.some(r=>r.team_id===p?.team_id),'Helfer darf keine Begegnung des eigenen Teams betreuen.');}
+ if(!m.session_id&&h.person_id){const p=await one(c,'SELECT team_id FROM people WHERE id=$1',[h.person_id]);requireThat(!m.roster.some(r=>r.team_id&&r.team_id===p?.team_id),'Helfer darf keine Begegnung des eigenen Teams betreuen.');}
  return h;
 }
 async function checkField(c,field,m){
@@ -55,11 +58,19 @@ async function checkTeams(c,m){
  if(ids.length)requireThat(!(await c.query('SELECT o.id FROM match_ops o JOIN match_roster r ON r.match_id=o.id WHERE o.id<>$1 AND o.status=ANY($2::text[]) AND r.person_id=ANY($3::int[])',[m.id,BUSY,ids])).rowCount,'Eine Person spielt bereits in einer anderen Begegnung.');
 }
 export async function setup(actorId,action,data,key){return transact(actorId,action,key,async(c,a)=>{lead(a);
+ if(action==='bulk_import')return importEntries(c,data.kind,parseImport(data.text,data.kind));
  if(action==='field_rename'){await c.query('UPDATE fields SET name=$1,version=version+1 WHERE id=$2',[cleanName(data.name,80),data.id]);return {audit:data};}
  if(action==='field_add'){const row=await one(c,'INSERT INTO fields(name) VALUES($1) RETURNING id',[cleanName(data.name,80)]);return row;}
- if(action==='person_add'){if(data.teamId)requireThat((await c.query('SELECT id FROM teams WHERE id=$1 AND NOT is_demo',[data.teamId])).rowCount,'Team fehlt.');return one(c,'INSERT INTO people(name,team_id) VALUES($1,$2) RETURNING id',[cleanName(data.name),data.teamId||null]);}
+ if(action==='person_add'){if(data.teamId)requireThat((await c.query('SELECT id FROM teams WHERE id=$1 AND NOT is_demo',[data.teamId])).rowCount,'Team fehlt.');const row=await one(c,'INSERT INTO people(name,team_id) VALUES($1,$2) RETURNING id',[cleanName(data.name),data.teamId||null]);await assignPath(c,'person',row.id);return row;}
  if(action==='person_link'){requireThat((await c.query('SELECT id FROM people WHERE id=$1 AND active',[data.personId])).rowCount,'Person fehlt.');requireThat((await c.query('SELECT telegram_id FROM staff WHERE telegram_id=$1',[String(data.userId)])).rowCount,'Helfer fehlt.');await c.query('UPDATE staff SET person_id=$1 WHERE telegram_id=$2',[data.personId,String(data.userId)]);return {audit:{userId:String(data.userId),personId:data.personId}};}
- if(action==='person_team'){await c.query('UPDATE people SET team_id=$1 WHERE id=$2',[data.teamId||null,data.personId]);return {audit:data};}
+ if(action==='person_team'){await c.query('UPDATE people SET team_id=$1 WHERE id=$2',[data.teamId||null,data.personId]);await assignPath(c,'person',data.personId,{refresh:true});return {audit:data};}
+ if(action==='classic_guests'){
+  const m=await getMatch(data.id,c);requireThat(m.game_id&&['planned','assigned'].includes(m.status),'Gäste nur vor Spielbeginn bei Teambegegnungen ändern.');
+  requireThat(data.version==null||m.version===data.version,'Spiel inzwischen geändert.');
+  const aNames=(data.guestA||[]).map(x=>cleanName(x,100)),bNames=(data.guestB||[]).map(x=>cleanName(x,100));requireThat(aNames.length+bNames.length<=30,'Höchstens 30 Gäste pro Spiel.');
+  requireThat(new Set([...aNames,...bNames].map(n=>n.toLowerCase())).size===aNames.length+bNames.length,'Gästenamen müssen in diesem Spiel eindeutig sein.');
+  await c.query('DELETE FROM match_roster WHERE match_id=$1 AND guest_name IS NOT NULL',[m.id]);for(const [side,names] of [['A',aNames],['B',bNames]])for(const name of names)await c.query('INSERT INTO match_roster(match_id,side,guest_name) VALUES($1,$2,$3)',[m.id,side,name]);await c.query('UPDATE match_ops SET version=version+1 WHERE id=$1',[m.id]);return {audit:{match:m.id,guestA:aNames,guestB:bNames}};
+ }
  if(action==='session_add'){const row=await one(c,'INSERT INTO turbo_sessions(name,min_games) VALUES($1,$2) RETURNING id',[cleanName(data.name),data.minGames||3]);return row;}
  if(action==='session_config'){
   const s=await one(c,'SELECT * FROM turbo_sessions WHERE id=$1',[data.id]);requireThat(s&&!s.finished,'Turbo-Sitzung fehlt oder ist beendet.');
@@ -68,7 +79,7 @@ export async function setup(actorId,action,data,key){return transact(actorId,act
   await c.query('UPDATE turbo_sessions SET min_games=$1,metrics=$2,tiebreakers=$3 WHERE id=$4',[data.minGames,JSON.stringify(metrics),JSON.stringify(ties),s.id]);return {audit:data};}
  if(action==='classic_metrics'){const metrics=metricList(data.metrics),ties=metricList(data.tiebreakers);requireThat(ties.every(x=>metrics.includes(x)),'Tiebreaker muss aktiviert sein.');requireThat(!(await c.query("SELECT id FROM match_ops WHERE game_id IS NOT NULL AND status NOT IN ('planned','cancelled')")).rowCount,'Wertung nach Spielbeginn gesperrt.');await c.query('UPDATE event_control SET metrics=$1,tiebreakers=$2 WHERE id=1',[JSON.stringify(metrics),JSON.stringify(ties)]);return {audit:data};}
  if(action==='session_finish'){requireThat(!(await c.query('SELECT id FROM match_ops WHERE session_id=$1 AND status=ANY($2::text[])',[data.id,BUSY])).rowCount,'Es sind noch Spiele offen.');await c.query('UPDATE turbo_sessions SET finished=true WHERE id=$1',[data.id]);return {audit:data};}
- if(action==='team_add'){return one(c,'INSERT INTO teams(name) VALUES($1) RETURNING id',[cleanName(data.name)]);}
+ if(action==='team_add'){const row=await one(c,'INSERT INTO teams(name) VALUES($1) RETURNING id',[cleanName(data.name)]);await assignPath(c,'team',row.id);return row;}
  if(action==='team_edit'){
   const team=await one(c,'SELECT * FROM teams WHERE id=$1 AND NOT is_demo',[data.id]);requireThat(team,'Team fehlt.');
   const allowed=['name','group_name','logo','disqualified'];requireThat(allowed.includes(data.field),'Ungültiges Feld.');
@@ -83,7 +94,7 @@ export async function setup(actorId,action,data,key){return transact(actorId,act
   if(data.field==='group_name')data.value=data.value?cleanName(data.value,40):null;
   if(data.field==='disqualified')requireThat(typeof data.value==='boolean','Ungültige Disqualifikation.');
   if(data.field==='logo')requireThat(data.value===null||/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(data.value),'Ungültiges Bild.');
-  await c.query(`UPDATE teams SET ${data.field}=$1,version=version+1 WHERE id=$2`,[data.value,team.id]);return {audit:{team:team.id,field:data.field}};
+  await c.query(`UPDATE teams SET ${data.field}=$1,version=version+1 WHERE id=$2`,[data.value,team.id]);if(data.field==='name'){await assignPath(c,'team',team.id,{refresh:true});for(const p of (await c.query('SELECT id FROM people WHERE team_id=$1',[team.id])).rows)await assignPath(c,'person',p.id,{refresh:true});}return {audit:{team:team.id,field:data.field}};
  }
  if(action==='groups_auto'){
   requireThat(!(await c.query("SELECT id FROM games WHERE NOT is_demo AND status<>'cancelled'")).rowCount,'Gruppen nur vor Erzeugung der Spiele neu einteilen.');
@@ -141,7 +152,7 @@ export async function matchAction(actorId,id,action,data={},key){return transact
   lead(a);requireThat(m.status==='pending','Meldung bereits bearbeitet.');
   const side=data.side||m.winning_side;requireThat(['A','B'].includes(side),'Gewinner fehlt.');if(side!==m.winning_side)cleanName(data.reason,500);
   await c.query("UPDATE match_ops SET status='finished',winning_side=$1,approved_by=$2,reason=$3,version=version+1 WHERE id=$4",[side,String(actorId),data.reason||'',m.id]);
-  if(m.game_id){const winner=m.roster.find(r=>r.side===side).team_id;await c.query("UPDATE games SET status='finished',winner_team_id=$1,version=version+1 WHERE id=$2",[winner,m.game_id]);await advanceKnockout(m.game_id,c);await syncGames(c);}
+  if(m.game_id){const winner=m.roster.find(r=>r.side===side&&r.team_id).team_id;await c.query("UPDATE games SET status='finished',winner_team_id=$1,version=version+1 WHERE id=$2",[winner,m.game_id]);await advanceKnockout(m.game_id,c);await syncGames(c);}
  }else if(action==='move'){
   lead(a);requireThat(BUSY.includes(m.status),'Spiel kann nicht verlegt werden.');await checkField(c,data.fieldId,m);await c.query('UPDATE match_ops SET field_id=$1,version=version+1 WHERE id=$2',[data.fieldId,m.id]);
  }else if(action==='helper'){
@@ -199,7 +210,7 @@ export async function suggestions(fieldId){
  const field=await one(db,'SELECT * FROM fields WHERE id=$1',[fieldId]);if(!field||field.closed||busy.some(x=>x.field_id===field.id))return [];
  const candidates=matches.filter(m=>m.status==='planned'&&!busy.some(b=>b.roster.some(br=>m.roster.some(r=>(r.person_id&&r.person_id===br.person_id)||(r.team_id&&r.team_id===br.team_id)))));
  const helpers=(await db.query("SELECT s.*,p.team_id FROM staff s LEFT JOIN people p ON p.id=s.person_id WHERE s.role<>'revoked' ORDER BY display_name")).rows;
- return candidates.map(m=>({...m,helpers:helpers.filter(h=>!(m.game_id&&m.roster.some(r=>r.team_id===h.team_id))),lastPlayed:m.roster.map(r=>({name:r.name,at:matches.filter(x=>x.status==='finished'&&x.roster.some(y=>(r.person_id&&r.person_id===y.person_id)||(r.team_id&&r.team_id===y.team_id))).map(x=>x.ended_at).filter(Boolean).sort((a,b)=>+new Date(b)-+new Date(a))[0]||null}))}));
+ return candidates.map(m=>({...m,helpers:helpers.filter(h=>!(m.game_id&&m.roster.some(r=>r.team_id&&r.team_id===h.team_id))),lastPlayed:m.roster.map(r=>({name:r.name,at:matches.filter(x=>x.status==='finished'&&x.roster.some(y=>(r.person_id&&r.person_id===y.person_id)||(r.team_id&&r.team_id===y.team_id))).map(x=>x.ended_at).filter(Boolean).sort((a,b)=>+new Date(b)-+new Date(a))[0]||null}))}));
 }
 
 export async function repairPreview(id,c=db){

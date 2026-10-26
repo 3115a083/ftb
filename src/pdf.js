@@ -1,3 +1,4 @@
+import { displayDate } from './dates.js';
 import PDFDocument from 'pdfkit';
 import { db } from './db.js';
 import { standings } from './tournament.js';
@@ -82,7 +83,7 @@ export async function rulesPdf() {
     if (!s.rules) d.font('Helvetica').fontSize(11).fillColor('#555').text('Das Regelwerk wurde noch nicht veröffentlicht.');
     else if (s.rules_html) drawFormattedRules(d, s.rules_html);
     else d.font('Helvetica').fontSize(10.5).fillColor('#111').text(s.rules, { lineGap: 3 });
-    d.moveDown(2).fontSize(8).fillColor('#777').text(`Erstellt mit FTB · ${new Date().toLocaleDateString('de-DE')}`, { align: 'center' });
+    d.moveDown(2).fontSize(8).fillColor('#777').text(`Erstellt mit FTB · ${displayDate(new Date())}`, { align: 'center' });
   });
 }
 

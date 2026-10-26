@@ -13,6 +13,7 @@ export function parseInstances(raw){
 }
 export async function createGateway({bot,pool,instances,request=fetch}){
  await pool.query(`CREATE TABLE IF NOT EXISTS gateway_selection(actor_id bigint PRIMARY KEY,instance_id text NOT NULL);
+ CREATE TABLE IF NOT EXISTS gateway_groups(chat_id bigint PRIMARY KEY,instance_id text NOT NULL);
  CREATE TABLE IF NOT EXISTS gateway_callbacks(token text PRIMARY KEY,actor_id bigint NOT NULL,instance_id text NOT NULL,data text NOT NULL,expires_at timestamptz NOT NULL);
  CREATE INDEX IF NOT EXISTS gateway_callback_expiry ON gateway_callbacks(expires_at);`);
  const app=express();app.disable('x-powered-by');app.use(express.json({limit:'12mb'}));
@@ -33,9 +34,18 @@ export async function createGateway({bot,pool,instances,request=fetch}){
   }catch{res.status(502).json({error:'Telegram-Aktion fehlgeschlagen.'});}
  });
  async function select(chat){return bot.sendMessage(chat,'Welche Instanz möchtest du bedienen?',{reply_markup:{inline_keyboard:instances.map(x=>[{text:x.name,callback_data:'select:'+x.id}])}});}
- async function forward(instance,type,payload){const response=await request(instance.url+'/internal/update',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+instance.secret},body:JSON.stringify({type,payload}),signal:AbortSignal.timeout(120000)});if(!response.ok)throw Error('Instanz nicht erreichbar.');}
+ async function forward(instance,type,payload){const response=await request(instance.url+'/internal/update',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+instance.secret},body:JSON.stringify({type,payload}),signal:AbortSignal.timeout(120000)});if(!response.ok)throw Error('Instanz nicht erreichbar.');return typeof response.json==='function'?response.json():{};}
  async function handle(type,payload){
-  const msg=type==='message'?payload:payload.message;const user=payload.from;if(msg?.chat?.type!=='private'||!user?.id)return;
+  const msg=type==='message'?payload:payload.message;const user=payload.from;if(!user?.id)return;
+  if(['group','supergroup'].includes(msg?.chat?.type)){
+   if(type!=='message'||!/^\/(?:ftb_verbinden|ftb_trennen|statistik|updates)(?:@\w+)?(?:\s|$)/.test(payload.text||''))return;
+   const current=(await pool.query('SELECT instance_id FROM gateway_groups WHERE chat_id=$1',[String(msg.chat.id)])).rows[0]?.instance_id;
+   const bind=/^\/ftb_verbinden(?:@\w+)?\s+([a-z0-9-]{1,12})\s+[a-f0-9]{36}$/.exec(payload.text||'');
+   const instance=instances.find(x=>x.id===(bind?.[1]||current));if(!instance)return;
+   if(current&&bind&&bind[1]!==current)return bot.sendMessage(msg.chat.id,'Zuerst /ftb_trennen für die bisherige Instanz senden.');
+   try{const result=await forward(instance,type,payload);if(result.groupBound)await pool.query('INSERT INTO gateway_groups(chat_id,instance_id) VALUES($1,$2) ON CONFLICT(chat_id) DO UPDATE SET instance_id=EXCLUDED.instance_id',[String(msg.chat.id),instance.id]);if(result.groupUnbound)await pool.query('DELETE FROM gateway_groups WHERE chat_id=$1 AND instance_id=$2',[String(msg.chat.id),instance.id]);}catch{await bot.sendMessage(msg.chat.id,'Instanz derzeit nicht erreichbar.').catch(()=>{});}return;
+  }
+  if(msg?.chat?.type!=='private')return;
   const chat=msg.chat.id;try{
    if(type==='message'&&/^\/instanzen(?:@\w+)?(?:\s|$)/.test(payload.text||''))return select(chat);
    if(type==='callback'&&/^select:[a-z0-9-]{1,12}$/.test(payload.data||'')){

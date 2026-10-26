@@ -11,6 +11,6 @@ export function installBotTransport(app,controller){
   const actual=String(req.headers.authorization||''),expected='Bearer '+process.env.INSTANCE_SECRET;
   if(actual.length!==expected.length||!timingSafeEqual(Buffer.from(actual),Buffer.from(expected)))return res.sendStatus(403);
   const {type,payload}=req.body||{};if(!controller||!['message','callback'].includes(type)||!payload?.from?.id)return res.sendStatus(400);
-  if(type==='message')await controller.onMessage(payload);else await controller.onCallback(payload);res.json({ok:true});
+  const result=type==='message'?await controller.onMessage(payload):await controller.onCallback(payload);res.json({ok:true,groupBound:result?.groupBound===true,groupUnbound:result?.groupUnbound===true});
  });
 }
