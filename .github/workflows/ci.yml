@@ -45,6 +45,8 @@ jobs:
           done
       - name: Test workflows, authorization, statistics and PostgreSQL concurrency
         run: npm test
+      - name: Real gateway with two isolated app processes
+        run: node tools/gateway-smoke.mjs
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
       - name: Install pinned browser test driver
