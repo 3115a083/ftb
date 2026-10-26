@@ -94,7 +94,7 @@ export async function setup(actorId,action,data,key){return transact(actorId,act
   await c.query("UPDATE games SET status='cancelled',version=version+1 WHERE NOT is_demo AND phase='group'");return {};
  }
  if(action==='group_games'){await createGroupGames({client:c});await syncGames(c);return {};}
- if(action==='knockout'){
+ if(action==='knockout'){requireThat((await one(c,'SELECT mode FROM event_control WHERE id=1')).mode==='classic','Im Turbo-Modus gibt es keine K.-o.-Phase und kein Finalspiel.');
   requireThat(!(await c.query("SELECT id FROM games WHERE phase='knockout' AND NOT is_demo AND status<>'cancelled'")).rowCount,'K.-o.-Phase existiert bereits. Keine Neuerzeugung über diesen Weg.');
   requireThat(!(await c.query("SELECT id FROM games WHERE phase='group' AND NOT is_demo AND status NOT IN ('finished','cancelled')")).rowCount,'Zuerst alle Gruppenergebnisse freigeben.');
   await createKnockout(data.mode||'single',c);await syncGames(c);return {};}

@@ -41,3 +41,11 @@ Die Beispiel-Compose verwendet einen gemeinsamen PostgreSQL-Server mit drei getr
 9. Im Bot die Instanz wechseln und einen alten Button öffnen. Er muss weiterhin seine ursprüngliche Instanz zeigen.
 
 Nach einem Update mit älteren, gleichzeitig betriebenen Modi können Administratoren unter Instanz & Website-Zugang → Andere Spiele abschließen aktive Begegnungen des anderen Modus beenden. Der Wechsel in einen Modus ist möglich, sobald keine aktiven Begegnungen des jeweils anderen Modus mehr bestehen. Neue Zuweisungen und Starts bleiben auf den gewählten Modus beschränkt.
+
+## Logos und HTTP-Test im Heimnetz
+
+Seiten-, Team- und Sponsorenlogos können im Bot als PNG- oder JPEG-Datei mit höchstens 2 MB gesendet werden. Für Transparenz das Original-PNG als **Datei/Dokument**, nicht als Telegram-Foto senden. Telegram-Fotos werden zu JPEG; bereits weiße Bildflächen erhalten dadurch keine Transparenz zurück. Logos erscheinen begrenzt im Kopfbereich und erhalten keinen erzwungenen Hintergrund.
+
+Bei `ALLOW_HTTP_TEST=1` bleiben CSS und JavaScript auf derselben HTTP-Adresse erreichbar. Der Testmodus setzt weder HTTPS-Upgrades für Assets noch HSTS. Für öffentlichen HTTPS-Betrieb bleibt `ALLOW_HTTP_TEST=0` mit den HTTPS-Schutzheadern erforderlich.
+
+Turbo hat keine Finalspiele und keinen automatischen Turnierabschluss. Eine offene Sitzung kann beliebig viele frei besetzte Spiele enthalten. Nur die ausdrückliche Aktion **Sitzung beenden** schließt sie für neue Spiele. Die Jahreswertung fasst weiterhin alle freigegebenen Spiele des gewählten Zeitraums zusammen.

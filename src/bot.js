@@ -27,8 +27,21 @@ const privateMessage=m=>m?.chat?.type==='private'&&m.from?.id;
 // All callbacks and form submissions re-check authorization against the database.
 // Drafts expire and cannot be saved using a button from an older dialog.
 export function createBotController(bot){
- const drafts=new Map(),queues=new Map(),pending=new Map();
- const send=(chat,text,rows=[])=>bot.sendMessage(chat,String(text).slice(0,4050),kb(rows));
+ const drafts=new Map(),queues=new Map(),pending=new Map(),outputs=new Map();
+ const send=(chat,text,rows=[])=>{
+  const chatKey=String(chat),previous=outputs.get(chatKey)||Promise.resolve();
+  const task=previous.catch(()=>{}).then(async()=>{
+   const old=(await db.query('SELECT message_id FROM bot_ui_messages WHERE chat_id=$1',[chatKey])).rows[0];
+   // Delete the prior navigation only after its replacement was delivered and saved.
+   const result=await bot.sendMessage(chat,String(text).slice(0,4050),kb(rows));
+   if(Number.isSafeInteger(result?.message_id)&&result.message_id>0){
+    await db.query('INSERT INTO bot_ui_messages(chat_id,message_id) VALUES($1,$2) ON CONFLICT(chat_id) DO UPDATE SET message_id=EXCLUDED.message_id',[chatKey,result.message_id]);
+    if(old&&String(old.message_id)!==String(result.message_id))await bot.deleteMessage(chat,Number(old.message_id)).catch(()=>{});
+   }
+   return result;
+  });
+  outputs.set(chatKey,task);const release=()=>{if(outputs.get(chatKey)===task)outputs.delete(chatKey);};void task.then(release,release);return task;
+ };
  const draftFor=id=>{const f=drafts.get(String(id));if(f&&f.expires>Date.now())return f;drafts.delete(String(id));return null;};
  async function notify(text,ids=null){const targets=ids|| (await db.query("SELECT telegram_id FROM staff WHERE role IN ('admin','lead')")).rows.map(x=>x.telegram_id);await Promise.allSettled([...new Set(targets.filter(Boolean).map(String))].map(id=>send(id,text,[back('home','Übersicht öffnen')])));}
  async function home(chat,id){
@@ -37,7 +50,7 @@ export function createBotController(bot){
   const config=await siteConfig(),matches=(await listMatches()).filter(m=>config.mode==='turbo'?m.session_id:m.game_id),own=matches.filter(m=>String(m.helper_id)===String(id)||m.roster.some(r=>r.person_id&&r.person_id===a.person_id));
   const rows=[[button('Meine Spiele','list:mine:0'),button('Spielplan & Tabellen','overview')]];
   let text=`FTB · ${config.mode==='turbo'?'Turbo':'Teamturnier'} · ${a.display_name}\nRolle: ${{admin:'Administration',lead:'Turnierleitung',helper:'Helfer'}[a.role]}\n${own.filter(m=>BUSY.includes(m.status)).length} eigene aktive Begegnungen`;
-  if(LEADS.includes(a.role)){const count=matches.filter(m=>m.status==='pending').length;text+=`\n${count} Ergebnisfreigaben offen`;rows.unshift([button(`Freigaben (${count})`,'list:pending:0'),button('Spielfelder','fields')]);rows.push([button('Spielbetrieb','list:active:0'),button('Turnier','tournament')],[button('Seite verwalten','page'),button('Verwaltung','manage')]);}
+  if(LEADS.includes(a.role)){const count=matches.filter(m=>m.status==='pending').length;text+=`\n${count} Ergebnisfreigaben offen`;rows.unshift([button(`Freigaben (${count})`,'list:pending:0'),button('Spielfelder','fields')]);rows.push([button('Spielbetrieb','list:active:0'),button(config.mode==='turbo'?'Turbo-Sitzungen':'Turnier','tournament')],[button('Seite verwalten','page'),button('Verwaltung','manage')]);}
   rows.push([button('Hilfe','help')]);return send(chat,text,rows);
  }
  async function ask(chat,id,spec){
@@ -70,10 +83,12 @@ export function createBotController(bot){
   let value=message.text||'';
   if(field.secret){await bot.deleteMessage(chat,message.message_id).catch(()=>{});drafts.delete(String(id));return f.submit({...f.values,[field.key]:value},`msg:${chat}:${message.message_id}`);}
   if(field.type==='photo'){
-   const photo=message.photo?.at(-1);requireThat(photo&&photo.file_size<=2000000,'Bitte ein Foto mit höchstens 2 MB senden.');
+   const photo=message.document||message.photo?.at(-1);requireThat(photo&&Number.isFinite(photo.file_size)&&photo.file_size>0&&photo.file_size<=2000000,'Bitte PNG oder JPEG mit höchstens 2 MB als Datei senden. Transparenz bleibt bei PNG-Dateien erhalten.');
+   if(message.document)requireThat(['image/png','image/jpeg'].includes(photo.mime_type),'Bitte eine PNG- oder JPEG-Datei senden.');
    const url=await bot.getFileLink(photo.file_id);const u=new URL(url);requireThat(u.protocol==='https:'&&u.hostname==='api.telegram.org','Ungültiger Datei-Endpunkt.');
-   const response=await fetch(url,{signal:AbortSignal.timeout(10000)});requireThat(response.ok,'Foto konnte nicht geladen werden.');
-   let size=0;const parts=[];for await(const chunk of response.body){size+=chunk.length;requireThat(size<=2000000,'Foto ist zu groß.');parts.push(chunk);}const data=Buffer.concat(parts);requireThat(data[0]===0xff&&data[1]===0xd8,'Bitte ein JPEG-Foto senden.');value='data:image/jpeg;base64,'+data.toString('base64');
+   const response=await fetch(url,{signal:AbortSignal.timeout(10000),redirect:'error'});requireThat(response.ok,'Foto konnte nicht geladen werden.');
+   let size=0;const parts=[];for await(const chunk of response.body){size+=chunk.length;requireThat(size<=2000000,'Foto ist zu groß.');parts.push(chunk);}const data=Buffer.concat(parts);const png=data.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));const jpeg=data[0]===0xff&&data[1]===0xd8&&data[2]===0xff;
+   requireThat(png||jpeg,'Datei ist kein PNG- oder JPEG-Bild.');if(message.document)requireThat(photo.mime_type===(png?'image/png':'image/jpeg'),'Dateityp und Bildinhalt passen nicht zusammen.');value='data:image/'+(png?'png':'jpeg')+';base64,'+data.toString('base64');
   }else if(field.type==='rules'){
    requireThat(message.text,'Bitte Text senden.');const current=f.values[field.key]||{parts:[],html:[]};
    requireThat(current.parts.join('\n\n').length+value.length<=60000,'Regelwerk ist zu lang.');current.parts.push(value);current.html.push(telegramToHtml(value,message.entities));f.values[field.key]=current;return send(chat,`Regelteil ${current.parts.length} übernommen. Weitere Nachricht senden oder übernehmen.`,[[button('Regelwerk übernehmen',`form:next:${f.nonce}`)],[button('Verwerfen','abort')]]);
@@ -141,7 +156,7 @@ export function createBotController(bot){
   if(messageId&&bot.editMessageText){try{return await bot.editMessageText(text.slice(0,4050),{chat_id:chat,message_id:messageId,...kb(rows)});}catch(e){if(String(e.response?.body?.description||'').includes('message is not modified'))return;}}
   return send(chat,text,rows);
  }
- async function overview(chat,id){requireThat(await actor(id),'Keine Berechtigung.');const tables=await standings();return send(chat,tables.map(g=>`Gruppe ${g.group}\n${g.teams.map(t=>`${t.disqualified?'DQ':t.place+'.'} ${t.name}: ${t.wins} Siege, ${t.losses} Niederlagen${t.tie_unresolved?' · Gleichstand':''}`).join('\n')}`).join('\n\n')||'Noch keine Gruppen.',[[button('Spielplan','list:all:0'),button('Turbo-Statistik','sessions')],back()]);}
+ async function overview(chat,id){requireThat(await actor(id),'Keine Berechtigung.');if((await siteConfig()).mode==='turbo')return send(chat,'Turbo: fortlaufende Spiele ohne Finalspiel. Neue Begegnungen können jederzeit in einer offenen Sitzung zusammengestellt werden.',[[button('Jahresrangliste','annual'),button('Turbo-Sitzungen','sessions')],[button('Spielplan','list:all:0')],back()]);const tables=await standings();return send(chat,tables.map(g=>`Gruppe ${g.group}\n${g.teams.map(t=>`${t.disqualified?'DQ':t.place+'.'} ${t.name}: ${t.wins} Siege, ${t.losses} Niederlagen${t.tie_unresolved?' · Gleichstand':''}`).join('\n')}`).join('\n\n')||'Noch keine Gruppen.',[[button('Spielplan','list:all:0'),button('Turbo-Statistik','sessions')],back()]);}
  async function page(chat,id){lead(await actor(id));return send(chat,'Seite verwalten',[[button('Ersteinrichtung','p:onboarding')],[button('Titel','p:title'),button('Beschreibung','p:description')],[button('Farben','p:branding'),button('Seitenlogo','p:logo')],[button('Laufbanner setzen','p:ticker'),button('Banner aus','p:banner_off')],[button('Regelwerk','p:rules'),button('Regelwerk-PDF','export:rules:0')],[button('Sponsoren','sponsors')],back()]);}
  async function fields(chat,id){lead(await actor(id));const rows=(await db.query('SELECT * FROM fields ORDER BY id')).rows;return send(chat,'Spielfelder', [...rows.map(x=>[button(`${x.name} · ${x.closed?'geschlossen':'geöffnet'}`,`field:${x.id}`)]),[button('Feld hinzufügen','field_add')],back()]);}
  async function manage(chat,id){const a=await actor(id);lead(a);return send(chat,'Verwaltung',[...(a.role==='admin'?[[button('Instanz & Website-Zugang','webconfig')]]:[]),[button('Beitrittsanfragen','admissions'),button('Personen & Rollen','staff')],[button('Teilnehmer & Teamzuordnung','people'),button('Spielfelder','fields')],[button('Veranstaltungspasswort','password')],[button('Änderungsverlauf','audit:0'),button('Testdaten','demo')],back()]);}
@@ -254,9 +269,9 @@ export function createBotController(bot){
   if(p[0]==='annual'){const stats=await turboStats(null);return send(chat,`${stats.session.name}\nMindestspiele: ${stats.session.min_games}\n${stats.rows.map(r=>`${r.place??'–'} ${r.name}: ${r.played} Spiele, ${r.wins} Siege`).join('\n')}`,[[button('Zeitraum / Export','period:gesamt')],back('sessions')]);}
   if(p[0]==='period'){return ask(chat,id,{title:'Statistikzeitraum',fields:[{key:'year',label:'Jahr (z. B. 2026) oder all',parse:v=>{requireThat(v==='all'||/^\d{4}$/.test(v),'Jahr oder all eingeben.');return v;}},{key:'day',label:'Optionaler Spieltag YYYY-MM-DD',optional:true},{key:'format',label:'Dateiformat',choices:[{label:'PDF',value:'pdf'},{label:'CSV',value:'csv'}]}],submit:async v=>{const stats=await turboStats(p[1]==='gesamt'?null:num(p[1]),db,v);return bot.sendDocument(chat,v.format==='pdf'?await statisticsPdf(stats):Buffer.from(statisticsCsv(stats)),{},{filename:'statistik.'+v.format,contentType:v.format==='pdf'?'application/pdf':'text/csv'});}});}
   if(p[0]==='sessions'){
-   const pageIndex=num(p[1]||0);const sessions=(await db.query('SELECT * FROM turbo_sessions ORDER BY id DESC ')).rows;return send(chat,'Turbo-Sitzungen',[[button('Jahresrangliste','annual')],...sessions.slice(pageIndex*8,pageIndex*8+8).map(s=>[button(s.name+(s.finished?' · beendet':''),`session:${s.id}`)]),...(LEADS.includes(a.role)?[[button('Turbo-Turnier starten','session_add')]]:[]),...pagination('sessions',pageIndex,sessions.length),back()]);
+   const pageIndex=num(p[1]||0);const sessions=(await db.query('SELECT * FROM turbo_sessions ORDER BY id DESC ')).rows;return send(chat,'Turbo-Sitzungen: beliebig viele Spiele, kein Finalspiel. Eine Sitzung bleibt offen, bis du sie ausdrücklich beendest.',[[button('Jahresrangliste','annual')],...sessions.slice(pageIndex*8,pageIndex*8+8).map(s=>[button(s.name+(s.finished?' · beendet':''),`session:${s.id}`)]),...(LEADS.includes(a.role)?[[button('Turbo-Sitzung anlegen','session_add')]]:[]),...pagination('sessions',pageIndex,sessions.length),back()]);
   }
-  if(p[0]==='session_add')return simple(chat,id,'Turbo-Turnier starten',[{key:'name',label:'Name'},{key:'minGames',label:'Mindestspiele für Rangliste (1 bis 1000)',parse:num}],(v,k)=>setup(id,'session_add',v,k));
+  if(p[0]==='session_add')return simple(chat,id,'Turbo-Sitzung anlegen',[{key:'name',label:'Name'},{key:'minGames',label:'Mindestspiele für Rangliste (1 bis 1000)',parse:num}],(v,k)=>setup(id,'session_add',v,k));
   if(p[0]==='session'){
    const stats=await turboStats(num(p[1]));return send(chat,`${stats.session.name}\nMindestspiele: ${stats.session.min_games}\n${stats.rows.map(r=>`${r.place??'–'} ${r.name}: ${r.played} Spiele, ${r.wins} Siege${r.qualified?'':' · noch ungewertet'}`).join('\n')}\nGäste: ${stats.guests.played} gemeinsame Einsätze`,[
     ...(LEADS.includes(a.role)&&!stats.session.finished?[[button('Spiel zusammenstellen',`turbo:${p[1]}:manual`),button('Zusammensetzung vorschlagen',`turbo:${p[1]}:shuffle`)],[button('Wertung einstellen',`session_config:${p[1]}`),button('Sitzung beenden',`session_finish:${p[1]}`)]]:[]),[button('PDF',`export:stats_pdf:${p[1]}`),button('CSV',`export:stats_csv:${p[1]}`)],[button('Zeitraum / Export',`period:${p[1]}`)],back('sessions')]);
@@ -296,7 +311,7 @@ export function createBotController(bot){
   }
   if(p[0]==='team_edit'){
    const field=p[2],t=(await db.query('SELECT * FROM teams WHERE id=$1',[num(p[1])])).rows[0];requireThat(t,'Team fehlt.');
-   return simple(chat,id,'Team bearbeiten',field==='disqualified'?[]:[{key:'value',label:field==='logo'?'Neues Logo als Foto senden':field==='name'?'Neuer Name':'Neue Gruppe',type:field==='logo'?'photo':undefined,optional:field!=='name'}],(v,k)=>setup(id,'team_edit',{id:t.id,field,value:field==='disqualified'?!t.disqualified:v.value||null},k),{summary:field==='disqualified'?()=>`${t.name}: ${t.disqualified?'Disqualifikation aufheben':'disqualifizieren'}. Offene Gruppenspiele dieses Teams werden bei Disqualifikation annulliert. Bereits freigegebene Gruppenergebnisse bleiben erhalten. K.-o.-Beteiligung erfordert den Reparaturdialog.`:undefined});
+   return simple(chat,id,'Team bearbeiten',field==='disqualified'?[]:[{key:'value',label:field==='logo'?'Neues Logo als PNG-/JPEG-Datei senden':field==='name'?'Neuer Name':'Neue Gruppe',type:field==='logo'?'photo':undefined,optional:field!=='name'}],(v,k)=>setup(id,'team_edit',{id:t.id,field,value:field==='disqualified'?!t.disqualified:v.value||null},k),{summary:field==='disqualified'?()=>`${t.name}: ${t.disqualified?'Disqualifikation aufheben':'disqualifizieren'}. Offene Gruppenspiele dieses Teams werden bei Disqualifikation annulliert. Bereits freigegebene Gruppenergebnisse bleiben erhalten. K.-o.-Beteiligung erfordert den Reparaturdialog.`:undefined});
   }
   if(p[0]==='groups')return send(chat,'Gruppen & Spielplan',[[button('Automatisch einteilen','groups_auto')],[button('Gruppenspiele erzeugen','group_games')],[button('Gleichstände auflösen','ties')],[button('Ungespielten Plan verwerfen','groups_reset')],back('tournament')]);
   if(p[0]==='groups_auto')return simple(chat,id,'Gruppen einteilen',[{key:'count',label:'Anzahl Gruppen (1 bis 26)',parse:num}],(v,k)=>setup(id,'groups_auto',v,k),{summary:v=>`${v.count} Gruppen. Vorhandene Gruppenzuordnungen werden ersetzt. Nur vor Erzeugung der Spiele möglich.`});
@@ -342,16 +357,16 @@ export function createBotController(bot){
   if(p[0]==='p'){
    lead(a);const expectedVersion=(await db.query('SELECT version FROM settings WHERE id=1')).rows[0].version;let kind=p[1],fields=[],title='Seite bearbeiten',submit;
    const colors=COMMON_COLORS.map(([label,value])=>({label,value}));
-   if(['title','description','ticker','logo'].includes(kind))fields=[{key:'value',label:{title:'Seitentitel',description:'Beschreibung',ticker:'Laufbanner',logo:'Logo als Foto senden'}[kind],optional:kind!=='title',type:kind==='logo'?'photo':undefined,max:kind==='title'?120:500}];
+   if(['title','description','ticker','logo'].includes(kind))fields=[{key:'value',label:{title:'Seitentitel',description:'Beschreibung',ticker:'Laufbanner',logo:'Logo als PNG-/JPEG-Datei senden. PNG als Datei erhält Transparenz.'}[kind],optional:kind!=='title',type:kind==='logo'?'photo':undefined,max:kind==='title'?120:500}];
    else if(kind==='banner_off'){kind='ticker';submit=(v,k)=>savePage(id,'ticker',{value:''},k);}
-   else if(kind==='final_mode')fields=[{key:'value',label:'Finalmodus',choices:[{label:'Ein Entscheidungsspiel',value:'single'},{label:'Best of Three',value:'bo3'}]}];
+   else if(kind==='final_mode'){requireThat((await siteConfig()).mode==='classic','Im Turbo-Modus gibt es keinen Finalmodus.');fields=[{key:'value',label:'Finalmodus',choices:[{label:'Ein Entscheidungsspiel',value:'single'},{label:'Best of Three',value:'bo3'}]}];}
    else if(kind==='branding')fields=[{key:'primary',label:'Primärfarbe',choices:colors},{key:'secondary',label:'Sekundärfarbe',choices:colors},{key:'accent',label:'Tertiärfarbe',choices:colors}];
    else if(kind==='rules')fields=[{key:'rules',label:'Formatierte Nachrichten senden. Mehrere Teile möglich.',type:'rules'}];
-   else if(kind==='sponsor_add'||kind==='sponsor_edit')fields=[{key:'name',label:'Sponsorname',max:120},{key:'logo',label:'Sponsorlogo als Foto senden',type:'photo',optional:true},{key:'url',label:'Website (http/https)',optional:true}];
+   else if(kind==='sponsor_add'||kind==='sponsor_edit')fields=[{key:'name',label:'Sponsorname',max:120},{key:'logo',label:'Sponsorlogo als PNG-/JPEG-Datei senden',type:'photo',optional:true},{key:'url',label:'Website (http/https)',optional:true}];
    else if(kind==='sponsor_delete')title='Sponsor entfernen';
    else if(kind==='demo_seed'||kind==='demo_clear')title=kind==='demo_seed'?'Testdaten erstellen':'Testdaten löschen';
    else if(kind==='onboarding'){
-    title='Ersteinrichtung';fields=[{key:'title',label:'Seitentitel',max:120},{key:'description',label:'Beschreibung',optional:true},{key:'logo',label:'Seitenlogo als Foto',type:'photo',optional:true},{key:'primary',label:'Primärfarbe',choices:colors},{key:'secondary',label:'Sekundärfarbe',choices:colors},{key:'accent',label:'Tertiärfarbe',choices:colors},{key:'final_mode',label:'Finalmodus',choices:[{label:'Ein Entscheidungsspiel',value:'single'},{label:'Best of Three',value:'bo3'}]}];
+    title='Ersteinrichtung';fields=[{key:'title',label:'Seitentitel',max:120},{key:'description',label:'Beschreibung',optional:true},{key:'logo',label:'Seitenlogo als PNG-/JPEG-Datei. PNG als Datei erhält Transparenz.',type:'photo',optional:true},{key:'primary',label:'Primärfarbe',choices:colors},{key:'secondary',label:'Sekundärfarbe',choices:colors},{key:'accent',label:'Tertiärfarbe',choices:colors},...((await siteConfig()).mode==='classic'?[{key:'final_mode',label:'Finalmodus',choices:[{label:'Ein Entscheidungsspiel',value:'single'},{label:'Best of Three',value:'bo3'}]}]:[])];
    }else throw Error('Unbekannter Seitenbereich.');
    return simple(chat,id,title,fields,submit||((v,k)=>savePage(id,kind,{...v,expectedVersion,id:p[2]?num(p[2]):undefined,...(kind==='rules'?{plain:v.rules.parts.join('\n\n'),html:v.rules.html.join('<br><br>')}:{}),...(kind==='description'||kind==='ticker'?{value:v.value||''}:{})},k)));
   }
@@ -381,7 +396,7 @@ export function createBotController(bot){
   if(chat)return send(chat,e.code?'Aktion fehlgeschlagen. Bitte aktuellen Stand öffnen.':String(e.message).slice(0,300),[back()]).catch(()=>{});
  }}
  function enqueue(update,fn){const id=String(update.from?.id||'');if((pending.get(id)||0)>=10)return Promise.resolve();pending.set(id,(pending.get(id)||0)+1);const previous=queues.get(id)||Promise.resolve();const task=previous.then(()=>safe(fn,update));queues.set(id,task);void task.finally(()=>{pending.set(id,(pending.get(id)||1)-1);if(!pending.get(id))pending.delete(id);if(queues.get(id)===task)queues.delete(id);});return task;}
- return {onCallback:q=>enqueue(q,callback),onMessage:m=>enqueue(m,message),home,drafts};
+ return {onCallback:q=>enqueue(q,callback),onMessage:m=>enqueue(m,async update=>{const result=await message(update);if(privateMessage(update)&&Number.isSafeInteger(update.message_id)&&update.message_id>0)await bot.deleteMessage(update.chat.id,update.message_id).catch(()=>{});return result;}),home,drafts};
 }
 export async function startBot(){
  if(!process.env.TELEGRAM_BOT_TOKEN&&!process.env.BOT_GATEWAY_URL)return null;

@@ -97,3 +97,8 @@ ALTER TABLE metric_events ADD COLUMN IF NOT EXISTS round_no int;
 ALTER TABLE event_control ADD COLUMN IF NOT EXISTS turbo_tiebreakers jsonb NOT NULL DEFAULT '["received","distributed","hits","empty_round"]';
 
 ALTER TABLE site_challenges ADD COLUMN IF NOT EXISTS next_path text NOT NULL DEFAULT '/';
+
+-- One current navigation message per private chat and application database.
+CREATE TABLE IF NOT EXISTS bot_ui_messages (
+ chat_id bigint PRIMARY KEY, message_id bigint NOT NULL
+);

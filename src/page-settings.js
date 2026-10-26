@@ -21,7 +21,7 @@ export async function savePage(actorId,kind,data,key){return transact(actorId,'p
   if(kind==='title')v=cleanName(v,120);
   if(kind==='description'||kind==='ticker'){requireThat(typeof v==='string'&&v.length<=500,'Höchstens 500 Zeichen.');}
   if(kind==='logo')requireThat(v===null||(/^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(v)&&v.length<2800000),'Ungültiges Logo.');
-  if(kind==='final_mode'){requireThat(['single','bo3'].includes(v),'Ungültiger Finalmodus.');requireThat(!(await c.query("SELECT id FROM games WHERE phase='knockout' AND NOT is_demo AND status<>'cancelled'")).rowCount,'Finalmodus nach Beginn der K.-o.-Phase gesperrt.');}
+  if(kind==='final_mode'){requireThat((await c.query('SELECT mode FROM event_control WHERE id=1')).rows[0].mode==='classic','Im Turbo-Modus gibt es keinen Finalmodus.');requireThat(['single','bo3'].includes(v),'Ungültiger Finalmodus.');requireThat(!(await c.query("SELECT id FROM games WHERE phase='knockout' AND NOT is_demo AND status<>'cancelled'")).rowCount,'Finalmodus nach Beginn der K.-o.-Phase gesperrt.');}
   await c.query(`UPDATE settings SET ${kind}=$1,version=version+1 WHERE id=1`,[v]);
   if(kind==='ticker')await c.query('UPDATE settings SET ticker_enabled=$1 WHERE id=1',[Boolean(v)]);
  }else if(kind==='branding'){
@@ -39,10 +39,11 @@ export async function savePage(actorId,kind,data,key){return transact(actorId,'p
  else if(kind==='demo_seed')await seedDemo(c);
  else if(kind==='demo_clear')await clearDemo(c);
  else if(kind==='onboarding'){
-  requireThat(!(await c.query("SELECT id FROM games WHERE phase='knockout' AND NOT is_demo AND status<>'cancelled'")).rowCount,'Ersteinrichtung nach Beginn der K.-o.-Phase gesperrt.');
-  const name=cleanName(data.title,120);requireThat(String(data.description||'').length<=500,'Beschreibung zu lang.');requireThat(['single','bo3'].includes(data.final_mode),'Finalmodus fehlt.');
+  const classic=(await c.query('SELECT mode FROM event_control WHERE id=1')).rows[0].mode==='classic';
+  if(classic)requireThat(!(await c.query("SELECT id FROM games WHERE phase='knockout' AND NOT is_demo AND status<>'cancelled'")).rowCount,'Ersteinrichtung nach Beginn der K.-o.-Phase gesperrt.');
+  const name=cleanName(data.title,120);requireThat(String(data.description||'').length<=500,'Beschreibung zu lang.');if(classic)requireThat(['single','bo3'].includes(data.final_mode),'Finalmodus fehlt.');
   const v=validatePalette(data.primary,data.secondary,data.accent);requireThat(v.ok,v.error);
-  await c.query('UPDATE settings SET title=$1,description=$2,logo=$3,primary_color=$4,secondary_color=$5,accent_color=$6,final_mode=$7,onboarding_done=true,version=version+1 WHERE id=1',[name,data.description||'',data.logo||null,data.primary,data.secondary,data.accent,data.final_mode]);
+  await c.query('UPDATE settings SET title=$1,description=$2,logo=$3,primary_color=$4,secondary_color=$5,accent_color=$6,final_mode=coalesce($7,final_mode),onboarding_done=true,version=version+1 WHERE id=1',[name,data.description||'',data.logo||null,data.primary,data.secondary,data.accent,classic?data.final_mode:null]);
  }else throw Error('Unbekannte Seiteneinstellung.');
  await c.query('UPDATE settings SET version=version+1 WHERE id=1');
  return {audit:{kind}};

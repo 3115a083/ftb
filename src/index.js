@@ -10,7 +10,12 @@ import { installBotTransport } from './bot-transport.js';
 import { installSiteAuth } from './site-auth.js';
 import { installWebsite } from './web.js';
 export const app=express();let runningBot=null;
-app.disable('x-powered-by');app.set('trust proxy',process.env.TRUST_PROXY==='1'?1:false);app.use(helmet({referrerPolicy:{policy:'strict-origin-when-cross-origin'}}));
+app.disable('x-powered-by');app.set('trust proxy',process.env.TRUST_PROXY==='1'?1:false);
+const secureHeaders=helmet({referrerPolicy:{policy:'strict-origin-when-cross-origin'}});
+// LAN HTTP tests have no TLS endpoint. Keep the production CSP, but do not
+// upgrade their same-origin assets to HTTPS or persist HSTS for the test host.
+const testHeaders=helmet({referrerPolicy:{policy:'strict-origin-when-cross-origin'},strictTransportSecurity:false,contentSecurityPolicy:{directives:{upgradeInsecureRequests:null}}});
+app.use((req,res,next)=>(process.env.ALLOW_HTTP_TEST==='1'?testHeaders:secureHeaders)(req,res,next));
 app.get('/favicon.ico',(req,res)=>res.status(204).end());
 app.get('/healthz',(req,res)=>res.send('ok'));
 app.use('/assets',express.static(fileURLToPath(new URL('../public/',import.meta.url)),{maxAge:'1h',etag:true}));

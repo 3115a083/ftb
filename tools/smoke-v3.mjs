@@ -19,10 +19,17 @@ const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('l
 const demo=createServer(async(req,res)=>{const file=req.url==='/'?'index.html':req.url==='/operations-demo.js'?'operations-demo.js':null;if(!file){res.writeHead(404);return res.end();}res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':'text/html');res.end(await readFile(new URL('../demo/'+file,import.meta.url)));});demo.listen(0,'127.0.0.1');await new Promise(resolve=>demo.once('listening',resolve));
 let browser;
 try{
- browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_BINARY||undefined,args:process.env.CHROME_ARGS?JSON.parse(process.env.CHROME_ARGS):['--no-sandbox']});
+ browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_BINARY||undefined,args:[...(process.env.CHROME_ARGS?JSON.parse(process.env.CHROME_ARGS):['--no-sandbox']),'--host-resolver-rules=MAP ftb-lan.test 127.0.0.1']});
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
- const base=`http://127.0.0.1:${server.address().port}`;
- await page.goto(base+'/');await page.getByRole('link',{name:'Statistik',exact:true}).click();
+ const base=`http://ftb-lan.test:${server.address().port}`;
+ // A non-loopback hostname catches CSP upgrades missed by localhost-only tests.
+ const logo='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=';
+ await db.query('UPDATE settings SET logo=$1 WHERE id=1',[logo]);
+ const response=await page.goto(base+'/');assert.ok(!response.headers()['content-security-policy'].includes('upgrade-insecure-requests'));
+ assert.equal(await page.locator('.brand').evaluate(el=>getComputedStyle(el).display),'flex','Stylesheet must load over LAN HTTP');
+ const logoBox=await page.locator('.logo img').boundingBox();assert.ok(logoBox.width<=64&&logoBox.height<=64);
+ assert.equal(await page.locator('.logo').evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)');assert.ok(await page.locator('.logo img').evaluate(el=>el.complete&&el.naturalWidth===1));
+ await page.getByRole('link',{name:'Statistik',exact:true}).click();
  await page.goto(base+'/statistik?s='+session.id);await page.getByRole('heading',{name:'Gäste gemeinsam'}).waitFor();
  assert.equal(await page.locator('tbody tr').count(),2);assert.ok(await page.getByText('Alex <Beispiel>',{exact:true}).count());
  const download=page.waitForEvent('download');await page.getByRole('link',{name:'CSV herunterladen'}).click();const csv=await download;assert.match(await readFile(await csv.path(),'utf8'),/Gäste gemeinsam/);

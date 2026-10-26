@@ -72,3 +72,7 @@ Downloads: `/statistik/ID.pdf`, `/statistik/ID.csv`, `/regelwerk.pdf`; `/turnier
 `npm ci --ignore-scripts`, `npm run verify`. Ohne DATABASE_URL laufen Datenbanktests mit PGlite. Mit DATABASE_URL muss die dedizierte Testdatenbank auf `_test` enden. CI verwendet PostgreSQL 17 und prüft zusätzlich echte konkurrierende Änderungen sowie den Docker-Build. Niemals Tests gegen die Turnierdatenbank ausführen.
 
 Vor echtem Einsatz zusätzlich in einem eigenen Teststack prüfen: Telegram-Nachrichten und Medienuploads, mehrere reale Helfergeräte, Neustart, Backup/Restore und tatsächliche Reverse-Proxy-Konfiguration. Die statische Demo dient dem Kennenlernen und verbindet sich nicht mit Telegram oder einer Datenbank.
+
+## Chat aufräumen
+
+Pro Instanz und privatem Chat ersetzt eine neue Bediennachricht die vorherige. FTB speichert deren Nachrichten-ID, damit das Aufräumen nach einem Neustart weitergeht. Eine alte Bediennachricht wird erst entfernt, nachdem die neue erfolgreich zugestellt und gespeichert wurde. Verarbeitete Befehle, Texte und Logo-Eingaben werden ebenfalls entfernt. PDF- und CSV-Downloads bleiben erhalten. Löschfehler verhindern keine Bedienung. Telegram kann insbesondere das Löschen älterer Nachrichten begrenzen; Nachrichten aus der Zeit vor dieser Funktion kann der Bot nicht rückwirkend aus dem Chatverlauf auslesen.

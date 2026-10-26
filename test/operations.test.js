@@ -11,7 +11,7 @@ let db,stop;
 before(async()=>{({db,stop}=await database());});
 after(async()=>{await stop();});
 beforeEach(async()=>{
- await db.query('TRUNCATE site_sessions,site_accounts,site_challenges,teams,people,staff,fields,turbo_sessions,match_ops,match_roster,metric_events,join_requests,login_limits,operation_requests,audit_log,event_control RESTART IDENTITY CASCADE');
+ await db.query('TRUNCATE bot_ui_messages,site_sessions,site_accounts,site_challenges,teams,people,staff,fields,turbo_sessions,match_ops,match_roster,metric_events,join_requests,login_limits,operation_requests,audit_log,event_control RESTART IDENTITY CASCADE');
  await db.query('INSERT INTO event_control(id) VALUES(1)');
  await db.query("INSERT INTO staff(telegram_id,display_name,role) VALUES(1,'Admin','admin'),(2,'Leitung','lead'),(3,'Helfer','helper'),(4,'Helfer zwei','helper')");
  await db.query('UPDATE settings SET winner_team_id=NULL,tournament_finished=false');
@@ -315,4 +315,52 @@ test('gateway binds old buttons to their originating instance and user across sw
   await restarted.onMessage({from,message_id:3,chat:message.chat,text:'/start web_one_'+'x'.repeat(32)});assert.match(forwarded.at(-1).url,/one/);
   const forbidden=await fetch(`http://127.0.0.1:${server.address().port}/rpc/one`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal(forbidden.status,403);
  }finally{await new Promise(r=>server.close(r));}
+});
+
+test('LAN HTTP serves assets without upgrading them while production retains HTTPS protections',async()=>{
+ const {app}=await import('../src/index.js'),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const old=process.env.ALLOW_HTTP_TEST;
+ try{const base=`http://127.0.0.1:${server.address().port}`;
+  process.env.ALLOW_HTTP_TEST='1';const testPage=await fetch(base+'/');assert.ok(!testPage.headers.get('content-security-policy').includes('upgrade-insecure-requests'));assert.equal(testPage.headers.get('strict-transport-security'),null);
+  for(const [file,type] of [['site.css','text/css'],['site.js','javascript'],['theme.js','javascript']]){const r=await fetch(base+'/assets/'+file);assert.equal(r.status,200);assert.ok(r.headers.get('content-type').includes(type));assert.ok(!r.headers.get('content-security-policy').includes('upgrade-insecure-requests'));}
+  delete process.env.ALLOW_HTTP_TEST;const secure=await fetch(base+'/');assert.match(secure.headers.get('content-security-policy'),/upgrade-insecure-requests/);assert.ok(secure.headers.get('strict-transport-security'));
+ }finally{if(old===undefined)delete process.env.ALLOW_HTTP_TEST;else process.env.ALLOW_HTTP_TEST=old;await new Promise(r=>server.close(r));}
+});
+test('Turbo onboarding omits finals and approved games never finish the ongoing series',async()=>{
+ const {savePage}=await import('../src/page-settings.js');await db.query("UPDATE event_control SET mode='turbo' WHERE id=1");
+ const sent=[],controller=createBotController({sendMessage:async(chat,text,options)=>{sent.push({text,options});return{};},answerCallbackQuery:async()=>{},deleteMessage:async()=>{}});
+ const q=data=>({id:key(),data,from:{id:1},message:{chat:{id:1,type:'private'}}});
+ await controller.onCallback(q('p:onboarding'));assert.ok(!controller.drafts.get('1').fields.some(x=>x.key==='final_mode'));await controller.onCallback(q('abort'));
+ await controller.onCallback(q('overview'));assert.match(sent.at(-1).text,/fortlaufende Spiele ohne Finalspiel/);assert.ok(!sent.at(-1).text.includes('Gruppen'));
+ await savePage(1,'onboarding',{title:'Jahresrunde',primary:'#15803D',secondary:'#FFFFFF',accent:'#111111'},key());
+ await assert.rejects(()=>savePage(1,'final_mode',{value:'bo3'},key()),/keinen Finalmodus/);await assert.rejects(()=>setup(1,'knockout',{mode:'single'},key()),/kein Finalspiel/);
+ const f=await fixture();for(let i=0;i<3;i++){
+  const game=i===0?f.game:await createTurbo(2,{sessionId:f.session.id,sideA:[{personId:f.bob.id}],sideB:[{personId:f.alice.id},{guestName:'Gast '+i}]},key());
+  if(i){await matchAction(2,game.id,'assign',{fieldId:f.field.id,helperId:'2'},key());await matchAction(2,game.id,'start',{},key());}
+  await matchAction(2,game.id,'report',{side:'A'},key());await matchAction(1,game.id,'approve',{},key());
+  assert.equal((await db.query('SELECT finished FROM turbo_sessions WHERE id=$1',[f.session.id])).rows[0].finished,false);
+ }
+ assert.equal(Number((await db.query('SELECT count(*) FROM games')).rows[0].count),0);
+ await db.query("UPDATE event_control SET mode='classic' WHERE id=1");await controller.onCallback(q('p:onboarding'));assert.ok(controller.drafts.get('1').fields.some(x=>x.key==='final_mode'));
+});
+test('Telegram logo uploads preserve PNG bytes and reject documents with misleading image types',async()=>{
+ const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=','base64');
+ const sent=[],controller=createBotController({sendMessage:async(chat,text)=>{sent.push(text);return{};},getFileLink:async()=> 'https://api.telegram.org/file/botTEST/logo.png',answerCallbackQuery:async()=>{},deleteMessage:async()=>{}}),q=data=>({id:key(),data,from:{id:1},message:{chat:{id:1,type:'private'}}});
+ const realFetch=globalThis.fetch;try{
+  await controller.onCallback(q('p:logo'));const nonce=controller.drafts.get('1').nonce;globalThis.fetch=async()=>new Response(bytes);
+  await controller.onMessage({message_id:10,from:{id:1},chat:{id:1,type:'private'},document:{file_id:'png',file_size:bytes.length,mime_type:'image/png'}});
+  assert.equal(controller.drafts.get('1').values.value,'data:image/png;base64,'+bytes.toString('base64'));await controller.onCallback(q('form:save:'+nonce));assert.equal((await db.query('SELECT logo FROM settings WHERE id=1')).rows[0].logo,'data:image/png;base64,'+bytes.toString('base64'));
+  await controller.onCallback(q('p:logo'));await controller.onMessage({message_id:11,from:{id:1},chat:{id:1,type:'private'},document:{file_id:'svg',file_size:100,mime_type:'image/svg+xml'}});assert.match(sent.at(-1),/PNG- oder JPEG-Datei/);
+  await controller.onMessage({message_id:12,from:{id:1},chat:{id:1,type:'private'},document:{file_id:'mismatch',file_size:bytes.length,mime_type:'image/jpeg'}});assert.match(sent.at(-1),/passen nicht zusammen/);
+ }finally{globalThis.fetch=realFetch;}
+});
+test('bot navigation cleanup persists across restarts and only removes a menu after replacement succeeds',async()=>{
+ let nextId=100,failSend=false,failDelete=false;const deleted=[],delivered=[];
+ const bot={sendMessage:async(chat,text)=>{if(failSend)throw Error('Synthetic delivery failure');const id=++nextId;delivered.push({chat,id});return {message_id:id};},answerCallbackQuery:async()=>{},deleteMessage:async(chat,id)=>{deleted.push({chat,id});if(failDelete)throw Error('Synthetic delete denied');}};
+ const q=(data,id=1)=>({id:key(),data,from:{id},message:{chat:{id,type:'private'}}});
+ let controller=createBotController(bot);await controller.onCallback(q('home'));assert.deepEqual(deleted,[]);await controller.onCallback(q('help'));assert.deepEqual(deleted,[{chat:1,id:101}]);
+ controller=createBotController(bot);await controller.onCallback(q('home'));assert.deepEqual(deleted.at(-1),{chat:1,id:102});
+ await controller.onMessage({message_id:20,from:{id:1},chat:{id:1,type:'private'},text:'/start'});assert.deepEqual(deleted.slice(-2),[{chat:1,id:103},{chat:1,id:20}]);
+ const before=deleted.length;failSend=true;await controller.onCallback(q('help'));assert.equal(deleted.length,before);assert.equal(Number((await db.query('SELECT message_id FROM bot_ui_messages WHERE chat_id=1')).rows[0].message_id),104);
+ failSend=false;failDelete=true;await controller.onCallback(q('help'));assert.equal(Number((await db.query('SELECT message_id FROM bot_ui_messages WHERE chat_id=1')).rows[0].message_id),105);failDelete=false;
+ await controller.onCallback(q('home',2));assert.ok(!deleted.some(x=>x.chat===2));
 });
