@@ -11,6 +11,7 @@ import { installSiteAuth } from './site-auth.js';
 import { installWebsite } from './web.js';
 export const app=express();let runningBot=null;
 app.disable('x-powered-by');app.set('trust proxy',process.env.TRUST_PROXY==='1'?1:false);app.use(helmet());
+app.get('/favicon.ico',(req,res)=>res.status(204).end());
 app.get('/healthz',(req,res)=>res.send('ok'));
 app.use('/assets',express.static(fileURLToPath(new URL('../public/',import.meta.url)),{maxAge:'1h',etag:true}));
 app.use(express.urlencoded({extended:false,limit:'4kb'}));app.use(express.json({limit:'256kb'}));
