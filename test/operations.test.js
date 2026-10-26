@@ -377,7 +377,7 @@ test('bulk imports validate atomically and publish unique named paths with perma
  const paths=(await db.query('SELECT name,public_path FROM people ORDER BY id')).rows.map(r=>r.public_path);assert.ok(paths.includes('Nord/Max'));assert.ok(paths.includes('West/Max'));assert.ok(paths.includes('Max'));
  const other=await setup(1,'person_add',{name:'Max'},key());assert.equal((await db.query('SELECT public_path FROM people WHERE id=$1',[other.id])).rows[0].public_path,'Max-2');
  const team=(await db.query("SELECT id FROM teams WHERE name='Nord'")).rows[0],person=(await db.query("SELECT id FROM people WHERE public_path='Nord/Max'")).rows[0];
- await setup(1,'team_edit',{id:team.id,field:'name',value:'Nord Neu'},key());assert.equal((await db.query('SELECT public_path FROM people WHERE id=$1',[person.id])).rows[0].public_path,'Nord-Neu/Max');
+ await setup(1,'team_edit',{id:team.id,field:'name',value:'Nord Neu'},key());await setup(1,'team_edit',{id:team.id,field:'name',value:'nord neu'},key());assert.equal((await db.query('SELECT public_path FROM people WHERE id=$1',[person.id])).rows[0].public_path,'Nord-Neu/Max');
  await loginServer(async base=>{
   const old=await fetch(base+'/personen/Nord/Max?page=2',{redirect:'manual'});assert.equal(old.status,301);assert.equal(old.headers.get('location'),'/personen/Nord-Neu/Max?page=2');
   assert.equal((await fetch(base+'/personen/'+person.id,{redirect:'manual'})).headers.get('location'),'/personen/Nord-Neu/Max');assert.equal((await fetch(base+'/personen/Nord-Neu/Max')).status,200);

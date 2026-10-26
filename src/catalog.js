@@ -6,7 +6,7 @@ export async function assignPath(c,kind,id,{refresh=false}={}){
  const row=(await c.query(`SELECT * FROM ${table} WHERE id=$1`,[id])).rows[0];if(!row)return null;if(row.public_path&&!refresh)return row.public_path;
  let prefix='';if(kind==='person'&&row.team_id){const teamPath=await assignPath(c,'team',row.team_id);if(teamPath)prefix=teamPath+'/';}
  const base=prefix+segment(row.name);let path=base,n=1;
- while(true){const old=(await c.query(`SELECT ${fk} FROM ${aliases} WHERE lower(path)=lower($1)`,[path])).rows[0];if(!old||old[fk]===id)break;path=base+'-'+(++n);}
+ while(true){const old=(await c.query(`SELECT path,${fk} FROM ${aliases} WHERE lower(path)=lower($1)`,[path])).rows[0];if(!old)break;if(old[fk]===id){path=old.path;break;}path=base+'-'+(++n);}
  await c.query(`INSERT INTO ${aliases}(path,${fk}) VALUES($1,$2) ON CONFLICT(path) DO NOTHING`,[path,id]);
  await c.query(`UPDATE ${table} SET public_path=$1 WHERE id=$2`,[path,id]);return path;
 }
