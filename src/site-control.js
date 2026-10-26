@@ -17,11 +17,13 @@ export async function configureSite(id,data,key){
   const current=(await c.query('SELECT site_password_hash FROM event_control WHERE id=1')).rows[0];
   requireThat(!methods.includes('password')||hash||current.site_password_hash,'Zuerst ein Seitenpasswort setzen.');
   if(data.timezone){try{new Intl.DateTimeFormat('de-DE',{timeZone:data.timezone}).format();}catch{throw Error('Ungültige Zeitzone.');}}
-  await c.query('UPDATE event_control SET mode=$1,mode_initialized=true,timezone=$2,site_methods=$3,site_password_hash=coalesce($4,site_password_hash),site_epoch=site_epoch+1,site_version=site_version+1 WHERE id=1',[mode,data.timezone||before.timezone,JSON.stringify(methods),hash]);
+  const methodsChanged=JSON.stringify([...methods].sort())!==JSON.stringify([...before.site_methods].sort());
+  const revoke=Boolean(hash||methodsChanged||data.revokeSessions);
+  await c.query('UPDATE event_control SET mode=$1,mode_initialized=true,timezone=$2,site_methods=$3,site_password_hash=coalesce($4,site_password_hash),site_epoch=site_epoch+$5,site_version=site_version+1 WHERE id=1',[mode,data.timezone||before.timezone,JSON.stringify(methods),hash,revoke?1:0]);
   if(data.minGames!=null)await c.query('UPDATE event_control SET turbo_min_games=$1 WHERE id=1',[data.minGames]);
   if(data.tiebreakers!=null)await c.query('UPDATE event_control SET turbo_tiebreakers=$1 WHERE id=1',[JSON.stringify(data.tiebreakers)]);
-  await c.query('DELETE FROM site_sessions');await c.query('DELETE FROM site_challenges');
-  return {audit:{mode,methods,timezone:data.timezone||before.timezone,minGames:data.minGames??before.turbo_min_games,tiebreakers:data.tiebreakers??before.turbo_tiebreakers,revokedSessions:true}};
+  if(revoke){await c.query('DELETE FROM site_sessions');await c.query('DELETE FROM site_challenges');}
+  return {audit:{mode,methods,timezone:data.timezone||before.timezone,minGames:data.minGames??before.turbo_min_games,tiebreakers:data.tiebreakers??before.turbo_tiebreakers,revokedSessions:revoke}};
  });
 }
 export async function saveSiteAccount(id,data,key){

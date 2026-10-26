@@ -95,3 +95,5 @@ ALTER TABLE event_control ADD COLUMN IF NOT EXISTS mode_initialized boolean NOT 
 ALTER TABLE metric_events ADD COLUMN IF NOT EXISTS round_no int;
 
 ALTER TABLE event_control ADD COLUMN IF NOT EXISTS turbo_tiebreakers jsonb NOT NULL DEFAULT '["received","distributed","hits","empty_round"]';
+
+ALTER TABLE site_challenges ADD COLUMN IF NOT EXISTS next_path text NOT NULL DEFAULT '/';

@@ -240,7 +240,7 @@ test('combined website login protects exports, remembers sessions, prevents CSRF
  await saveSiteAccount(1,{username:'visitor',password:'Private account password!'},key());assert.equal(await actor(77),undefined);
  await loginServer(async base=>{
   assert.equal((await fetch(base+'/favicon.ico')).status,204);
-  const locked=await fetch(base+'/statistik/gesamt.csv',{redirect:'manual'});assert.equal(locked.status,302);assert.equal(locked.headers.get('location'),'/login');
+  const locked=await fetch(base+'/statistik/gesamt.csv',{redirect:'manual'});assert.equal(locked.status,302);assert.equal(locked.headers.get('location'),'/login?next=%2Fstatistik%2Fgesamt.csv');
   const form=await fetch(base+'/login'),html=await form.text(),cookie=cookiePair(form),csrf=formToken(html);assert.equal(form.headers.get('referrer-policy'),'strict-origin-when-cross-origin');
   assert.equal((await fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded',origin:'null'},body:new URLSearchParams({csrf,method:'account',username:'visitor',password:'Private account password!'}),redirect:'manual'})).status,403);
   assert.equal((await fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({method:'account',username:'visitor',password:'Private account password!'}),redirect:'manual'})).status,403);
@@ -256,11 +256,11 @@ test('Telegram website login requires allowed identity, explicit consent and the
  await configureSite(1,{methods:['telegram']},key());await saveSiteAccount(1,{username:'telegram-viewer',telegramId:'77'},key());process.env.TELEGRAM_BOT_USERNAME='FtbTestBot';
  await loginServer(async base=>{
   const r=await fetch(base+'/login'),csrf=formToken(await r.text()),cookie=cookiePair(r);
-  const start=await fetch(base+'/login/telegram',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded',origin:base},body:new URLSearchParams({csrf,remember:'1'})});const html=await start.text(),token=/data-token="([\w-]+)"/.exec(html)?.[1];assert.ok(token);assert.match(html,/web_local_/);
+  const start=await fetch(base+'/login/telegram',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded',origin:base},body:new URLSearchParams({csrf,remember:'1',next:'/personen/7?page=2'})});const html=await start.text(),token=/data-token="([\w-]+)"/.exec(html)?.[1];assert.ok(token);assert.match(html,/web_local_/);
   await assert.rejects(()=>confirmWebLogin(token,78,true),/freigegeben/);await confirmWebLogin(token,77,false);
   const check=extra=>fetch(base+'/login/telegram/check',{method:'POST',headers:{cookie:extra,'Content-Type':'application/x-www-form-urlencoded',origin:base},body:new URLSearchParams({csrf,token})});
-  const bound=cookie+'; '+cookiePair(start);assert.deepEqual(await check(bound).then(r=>r.json()),{ready:false});await confirmWebLogin(token,77,true);
-  assert.equal((await check(cookie)).status,403);const finish=await check(bound);assert.deepEqual(await finish.json(),{ready:true});assert.ok(cookiePair(finish).includes('ftb-session='));assert.deepEqual(await check(bound).then(r=>r.json()),{ready:false});
+  const bound=cookie+'; '+cookiePair(start);await configureSite(1,{minGames:3},key());assert.deepEqual(await check(bound).then(r=>r.json()),{ready:false});await confirmWebLogin(token,77,true);
+  assert.equal((await check(cookie)).status,403);const finish=await check(bound);assert.deepEqual(await finish.json(),{ready:true,next:'/personen/7?page=2'});assert.ok(cookiePair(finish).includes('ftb-session='));assert.equal((await check(bound)).status,410);
  });
 });
 test('website brute-force limits survive new clients and rotation invalidates shared sessions',async()=>{
@@ -270,6 +270,35 @@ test('website brute-force limits survive new clients and rotation invalidates sh
   const r=await fetch(base+'/login'),csrf=formToken(await r.text()),cookie=cookiePair(r);
   const login=await fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,method:'password',password:'Shared password old!'}),redirect:'manual'});assert.equal(login.status,303);assert.ok(!login.headers.get('set-cookie').includes('Max-Age'));
   const session=cookiePair(login);await configureSite(1,{password:'Shared password new!'},key());assert.equal((await fetch(base+'/',{headers:{cookie:session},redirect:'manual'})).status,302);
+ });
+});
+test('website return destinations stay internal and preserve filters through failed and successful logins',async()=>{
+ const {returnPath}=await import('../src/site-auth.js');
+ for(const unsafe of ['https://evil.invalid','//evil.invalid','/\\evil.invalid','/login','/internal/update','/%2f%2fevil.invalid','/statistik\n','/statistik/../../login'])assert.equal(returnPath(unsafe),'/',unsafe);
+ for(const safe of ['/spiele/12','/personen/7?page=2','/statistik?year=2025&day=2025-12-31','/statistik/12.pdf','/statistik/gesamt.csv'])assert.equal(returnPath(safe),safe);
+ const {configureSite}=await import('../src/site-control.js');await configureSite(1,{password:'Return destination password!',methods:['password']},key());
+ await loginServer(async base=>{
+  const target='/statistik?year=2025&day=2025-12-31',locked=await fetch(base+target,{redirect:'manual'});
+  assert.equal(locked.headers.get('location'),'/login?next='+encodeURIComponent(target));
+  const form=await fetch(base+locked.headers.get('location')),html=await form.text(),csrf=formToken(html),cookie=cookiePair(form);assert.match(html,/name="next" value="\/statistik\?year=2025&amp;day=2025-12-31"/);
+  const submit=password=>fetch(base+'/login',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,method:'password',password,next:target}),redirect:'manual'});
+  const failed=await submit('Wrong password');assert.equal(failed.status,401);assert.match(await failed.text(),/name="next" value="\/statistik\?year=2025&amp;day=2025-12-31"/);
+  const login=await submit('Return destination password!');assert.equal(login.headers.get('location'),target);const session=cookiePair(login);
+  await configureSite(1,{minGames:5,timezone:'Europe/Brussels',tiebreakers:['hits']},key());assert.equal((await fetch(base+target,{headers:{cookie:session},redirect:'manual'})).status,200);
+  assert.equal((await fetch(base+'/login?next=//evil.invalid',{headers:{cookie:session},redirect:'manual'})).headers.get('location'),'/');
+  await configureSite(1,{revokeSessions:true},key());assert.equal((await fetch(base+target,{headers:{cookie:session},redirect:'manual'})).status,302);
+ });
+});
+test('expired Telegram challenges cannot issue sessions and explicit revocation cancels pending logins',async()=>{
+ const {configureSite,saveSiteAccount}=await import('../src/site-control.js');const {confirmWebLogin,digest}=await import('../src/site-auth.js');
+ await configureSite(1,{methods:['telegram']},key());await saveSiteAccount(1,{username:'telegram-viewer',telegramId:'77'},key());process.env.TELEGRAM_BOT_USERNAME='FtbTestBot';
+ await loginServer(async base=>{
+  const r=await fetch(base+'/login'),csrf=formToken(await r.text()),cookie=cookiePair(r);
+  const start=async()=>{const r=await fetch(base+'/login/telegram',{method:'POST',headers:{cookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,next:'//evil.invalid'})}),html=await r.text();assert.match(html,/data-expires="/);return {token:/data-token="([\w-]+)"/.exec(html)[1],bound:cookie+'; '+cookiePair(r)};};
+  const check=c=>fetch(base+'/login/telegram/check',{method:'POST',headers:{cookie:c.bound,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,token:c.token})});
+  const expired=await start();await confirmWebLogin(expired.token,77,true);await db.query("UPDATE site_challenges SET expires_at=now()-interval '1 second' WHERE token_hash=$1",[digest(expired.token)]);assert.equal((await check(expired)).status,410);assert.equal(Number((await db.query('SELECT count(*) FROM site_sessions')).rows[0].count),0);
+  const revoked=await start();await configureSite(1,{revokeSessions:true},key());assert.equal((await check(revoked)).status,410);await assert.rejects(()=>confirmWebLogin(revoked.token,77,true),/abgelaufen/);
+  const good=await start();await confirmWebLogin(good.token,77,true);assert.deepEqual(await check(good).then(r=>r.json()),{ready:true,next:'/'});
  });
 });
 test('gateway binds old buttons to their originating instance and user across switches and restarts',async()=>{
