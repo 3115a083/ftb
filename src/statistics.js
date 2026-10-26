@@ -8,7 +8,7 @@ export function periodFilter(input={},timezone='Europe/Berlin'){
 }
 export async function turboStats(sessionId,c=db,filter={}){
  const annual=sessionId==null,control=(await c.query('SELECT * FROM event_control WHERE id=1')).rows[0];
- const session=annual?{id:null,name:'Turbo-Jahresrangliste',min_games:control.turbo_min_games,metrics:Object.keys(METRICS),tiebreakers:['received','distributed','hits','empty_round']}:(await c.query('SELECT * FROM turbo_sessions WHERE id=$1',[sessionId])).rows[0];requireThat(session,'Turbo-Sitzung nicht gefunden.');
+ const session=annual?{id:null,name:'Turbo-Jahresrangliste',min_games:control.turbo_min_games,metrics:Object.keys(METRICS),tiebreakers:control.turbo_tiebreakers}:(await c.query('SELECT * FROM turbo_sessions WHERE id=$1',[sessionId])).rows[0];requireThat(session,'Turbo-Sitzung nicht gefunden.');
  const period=periodFilter(filter,control.timezone),args=[],where=["m.session_id IS NOT NULL","m.status='finished'"];
  if(!annual){args.push(sessionId);where.push(`m.session_id=$${args.length}`);}if(period.year!=='all'){args.push(Number(period.year));where.push(`extract(year FROM m.played_on)=$${args.length}`);}if(period.day){args.push(period.day);where.push(`m.played_on=$${args.length}::date`);}
  const entries=(await c.query(`SELECT r.id,r.person_id,r.guest_name,r.side,m.id match_id,m.winning_side,p.name FROM match_roster r JOIN match_ops m ON m.id=r.match_id LEFT JOIN people p ON p.id=r.person_id WHERE ${where.join(' AND ')} ORDER BY m.id,r.id`,args)).rows;

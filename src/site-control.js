@@ -1,8 +1,8 @@
 import { db } from './db.js';
 import { transact } from './transactions.js';
 import { hashPassword } from './auth.js';
-import { BUSY, cleanName, requireThat } from './rules.js';
-export async function siteConfig(c=db){return (await c.query('SELECT mode,timezone,turbo_min_games,site_methods,site_epoch,site_version FROM event_control WHERE id=1')).rows[0];}
+import { BUSY, cleanName, requireThat, metricList } from './rules.js';
+export async function siteConfig(c=db){return (await c.query('SELECT mode,timezone,turbo_min_games,turbo_tiebreakers,site_methods,site_epoch,site_version FROM event_control WHERE id=1')).rows[0];}
 export async function configureSite(id,data,key){
  const a=(await db.query('SELECT role FROM staff WHERE telegram_id=$1',[String(id)])).rows[0];requireThat(a?.role==='admin','Nur Administratoren.');
  const hash=data.password?await hashPassword(data.password):null;
@@ -12,14 +12,16 @@ export async function configureSite(id,data,key){
   const mode=data.mode||before.mode;requireThat(['classic','turbo'].includes(mode),'Ungültiger Modus.');
   if(mode!==before.mode)requireThat(!(await c.query('SELECT id FROM match_ops WHERE status=ANY($1::text[])',[BUSY])).rowCount,'Zuerst alle laufenden oder zugewiesenen Spiele abschließen.');
   const methods=data.methods??before.site_methods;requireThat(Array.isArray(methods)&&methods.every(x=>['password','account','telegram'].includes(x))&&new Set(methods).size===methods.length,'Ungültige Anmeldearten.');
+  if(data.tiebreakers!=null)metricList(data.tiebreakers);
   if(data.minGames!=null)requireThat(Number.isInteger(data.minGames)&&data.minGames>=1&&data.minGames<=1000,'Mindestspielzahl: 1 bis 1000.');
   const current=(await c.query('SELECT site_password_hash FROM event_control WHERE id=1')).rows[0];
   requireThat(!methods.includes('password')||hash||current.site_password_hash,'Zuerst ein Seitenpasswort setzen.');
   if(data.timezone){try{new Intl.DateTimeFormat('de-DE',{timeZone:data.timezone}).format();}catch{throw Error('Ungültige Zeitzone.');}}
   await c.query('UPDATE event_control SET mode=$1,mode_initialized=true,timezone=$2,site_methods=$3,site_password_hash=coalesce($4,site_password_hash),site_epoch=site_epoch+1,site_version=site_version+1 WHERE id=1',[mode,data.timezone||before.timezone,JSON.stringify(methods),hash]);
   if(data.minGames!=null)await c.query('UPDATE event_control SET turbo_min_games=$1 WHERE id=1',[data.minGames]);
+  if(data.tiebreakers!=null)await c.query('UPDATE event_control SET turbo_tiebreakers=$1 WHERE id=1',[JSON.stringify(data.tiebreakers)]);
   await c.query('DELETE FROM site_sessions');await c.query('DELETE FROM site_challenges');
-  return {audit:{mode,methods,timezone:data.timezone||before.timezone,revokedSessions:true}};
+  return {audit:{mode,methods,timezone:data.timezone||before.timezone,minGames:data.minGames??before.turbo_min_games,tiebreakers:data.tiebreakers??before.turbo_tiebreakers,revokedSessions:true}};
  });
 }
 export async function saveSiteAccount(id,data,key){

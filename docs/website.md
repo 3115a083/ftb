@@ -10,7 +10,7 @@ Auf mobilen Ranglisten stehen Platz, Name, Siegquote und Spiele im Vordergrund. 
 
 ## Turbo-Jahreswertung
 
-Standard ist das aktuelle Kalenderjahr in der eingestellten Veranstaltungszeitzone. Die Jahresrangliste fasst alle Turbo-Sitzungen einer Instanz zusammen. Sitzung, Jahr und Spieltag können gefiltert werden. Die Mindestspielzahl gilt im ausgewählten Zeitraum. Sitzungswertungen verwenden ihre eigenen Metriken und Tiebreaker; die Gesamtwertung verwendet nach Siegquote die Reihenfolge Strafbiere erhalten, verteilt, Treffer und Runden bis leer. Fehlende Messwerte sind kein gemessener Nullwert.
+Standard ist das aktuelle Kalenderjahr in der eingestellten Veranstaltungszeitzone. Die Jahresrangliste fasst alle Turbo-Sitzungen einer Instanz zusammen. Sitzung, Jahr und Spieltag können gefiltert werden. Die Mindestspielzahl gilt im ausgewählten Zeitraum. Sitzungswertungen verwenden ihre eigenen Metriken und Tiebreaker; die Gesamtwertung verwendet nach Siegquote standardmäßig die konfigurierbare Reihenfolge Strafbiere erhalten, verteilt, Treffer und Runden bis leer. Fehlende Messwerte sind kein gemessener Nullwert.
 
 Besetzungen sind pro Begegnung frei, auch nur Gäste sind möglich. Nur eingesetzte Personen erhalten Einsätze und persönliche Werte. Gastnamen werden pro Spiel neu angelegt. Eine alte Besetzung kann im Bot als Vorlage übernommen werden. Unterschiedliche Seitengrößen werden vor dem Start angezeigt. Neue Metrikereignisse speichern ihre Runde; vorhandene historische Ereignisse erhalten keine erfundene Rundennummer.
 
